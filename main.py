@@ -41,9 +41,12 @@ def verify_token(token: str):
             token = token.split(' ')[1]
         
         print(f"Processing token: {token[:20]}...")
-        payload = jwt.decode(token, SUPABASE_SECRET_KEY,
-                           audience=["authenticated"],
-                           algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(
+            token, 
+            SUPABASE_SECRET_KEY,
+            algorithms=["HS256", "JWS"],  # Allow both algorithms
+            audience=["authenticated"]
+        )
         print("Token successfully verified")
         return payload
     except jwt.ExpiredSignatureError:
@@ -93,24 +96,36 @@ def root():
 @app.post("/trips/create")
 async def create_trip(
     trip: Trip,
-    # credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
     session: Session = Depends(get_session)
 ):
     """
     Create a new trip and generate its itinerary.
     Requires authentication.
     """
-    # if not credentials:
-    #     raise HTTPException(status_code=403, detail="Not authenticated")
-    
-    # auth_result = verify_token(credentials.credentials)
-    # trip.user_id = auth_result['sub']
-    
     try:
+        if not credentials or not credentials.credentials:
+            raise HTTPException(status_code=403, detail="No authentication credentials provided")
+        
+        # Log the incoming request
+        print(f"Creating trip with credentials: {credentials.credentials[:20]}...")
+        
+        # Verify the token and get the user ID
+        auth_result = verify_token(credentials.credentials)
+        user_id = auth_result.get('sub')
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Could not determine user ID from token")
+        
+        # Set the user_id from the token
+        trip.user_id = user_id
+        print(f"Setting trip user_id to: {user_id}")
+        
         # Save the trip
         session.add(trip)
         session.commit()
         session.refresh(trip)
+        print(f"Created trip with ID: {trip.id}")
         
         # Generate itinerary using OpenAI
         itinerary_content = await generate_itinerary(trip)
@@ -120,7 +135,6 @@ async def create_trip(
         day_number = 1
         
         while current_date <= trip.end_date:
-            # Create an itinerary for each day of the trip
             itinerary = Itinerary(
                 trip_id=trip.id,
                 day_number=day_number,
@@ -139,8 +153,12 @@ async def create_trip(
         session.commit()
         return {"message": "Trip created successfully", "trip": trip}
     
+    except HTTPException as he:
+        session.rollback()
+        raise he
     except Exception as e:
         session.rollback()
+        print(f"Error creating trip: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/trips/")
