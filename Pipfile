@@ -10,6 +10,7 @@ uvicorn = "*"
 psy = "*"
 psycopg2-binary = "*"
 pyjwt = "*"
+openai = "*"
 
 [dev-packages]
 
