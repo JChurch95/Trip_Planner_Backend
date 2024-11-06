@@ -35,14 +35,26 @@ app.add_middleware(
 def verify_token(token: str):
     """Verify JWT token from Supabase"""
     try:
+        print("Raw token received:", token)
+        # Remove 'Bearer ' if present
+        if token.startswith('Bearer '):
+            token = token.split(' ')[1]
+        
+        print(f"Processing token: {token[:20]}...")
         payload = jwt.decode(token, SUPABASE_SECRET_KEY,
-                             audience=["authenticated"],
-                             algorithms=[JWT_ALGORITHM])
+                           audience=["authenticated"],
+                           algorithms=[JWT_ALGORITHM])
+        print("Token successfully verified")
         return payload
     except jwt.ExpiredSignatureError:
+        print("Token expired")
         raise HTTPException(status_code=401, detail="Token has expired")
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as e:
+        print(f"Invalid token error: {str(e)}")
         raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        print(f"Unexpected error during token verification: {str(e)}")
+        raise HTTPException(status_code=401, detail="Token verification failed")
 
 async def generate_itinerary(trip: Trip) -> str:
     """
