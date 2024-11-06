@@ -93,18 +93,18 @@ def root():
 @app.post("/trips/create")
 async def create_trip(
     trip: Trip,
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    # credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
     session: Session = Depends(get_session)
 ):
     """
     Create a new trip and generate its itinerary.
     Requires authentication.
     """
-    if not credentials:
-        raise HTTPException(status_code=403, detail="Not authenticated")
+    # if not credentials:
+    #     raise HTTPException(status_code=403, detail="Not authenticated")
     
-    auth_result = verify_token(credentials.credentials)
-    trip.user_id = auth_result['sub']
+    # auth_result = verify_token(credentials.credentials)
+    # trip.user_id = auth_result['sub']
     
     try:
         # Save the trip
