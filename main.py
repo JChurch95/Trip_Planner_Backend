@@ -12,9 +12,12 @@ from models.trips import Trip
 from models.itineraries import Itinerary
 from services.openai_service import OpenAIService
 
-app = FastAPI()
+app = FastAPI(
+    title="Trip Planner API",
+    description="API for managing travel itineraries",
+    version="1.0.0",
+)
 
-# Configure CORS
 origins = [
     "http://localhost",
     "http://localhost:5173",
@@ -24,6 +27,7 @@ origins = [
     "http://localhost:3000",
 ]
 
+# Add security scheme configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -31,6 +35,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Configure security scheme for Swagger UI
+app.swagger_ui_init_oauth = {
+    "usePkceWithAuthorizationCodeGrant": True,
+}
+
+# Define security scheme
+security_scheme = {
+    "Bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Enter your JWT token in the format: Bearer <token>"
+    }
+}
+
+# Add security scheme to OpenAPI configuration
+app.openapi_components = {"securitySchemes": security_scheme}
+app.openapi_security = [{"Bearer": []}]
 
 def verify_token(token: str):
     """Verify JWT token from Supabase"""
@@ -41,20 +64,20 @@ def verify_token(token: str):
             token = token.split(' ')[1]
         
         print(f"Processing token: {token[:20]}...")
-        payload = jwt.decode(
-            token, 
-            SUPABASE_SECRET_KEY,
-            algorithms=["HS256", "JWS"],  # Allow both algorithms
-            audience=["authenticated"]
-        )
-        print("Token successfully verified")
-        return payload
-    except jwt.ExpiredSignatureError:
-        print("Token expired")
-        raise HTTPException(status_code=401, detail="Token has expired")
-    except jwt.InvalidTokenError as e:
-        print(f"Invalid token error: {str(e)}")
-        raise HTTPException(status_code=401, detail="Invalid token")
+        try:
+            payload = jwt.decode(
+                token, 
+                SUPABASE_SECRET_KEY,
+                algorithms=["HS256", "JWS"],
+                audience=["authenticated"]
+            )
+            print("Token decoded successfully:", payload)
+            return payload
+        except jwt.InvalidTokenError as e:
+            print(f"Token decode error: {str(e)}")
+            print(f"Token used: {token}")
+            print(f"Secret key used: {SUPABASE_SECRET_KEY[:10]}...")
+            raise
     except Exception as e:
         print(f"Unexpected error during token verification: {str(e)}")
         raise HTTPException(status_code=401, detail="Token verification failed")
