@@ -10,6 +10,7 @@ from db import get_session, init_db
 from config import SUPABASE_SECRET_KEY, JWT_ALGORITHM
 from models.trips import Trip
 from models.itineraries import Itinerary
+from models.user_profile import UserProfile, TravelerType, ActivityLevel
 from services.openai_service import OpenAIService
 
 app = FastAPI(
@@ -89,7 +90,13 @@ async def generate_itinerary(trip: Trip) -> str:
     """
     ai_service = OpenAIService()
     
-    # Updated prompt format to match new system instructions
+    # Get user profile for additional context
+    session = next(get_session())
+    user_profile = session.exec(
+        select(UserProfile).where(UserProfile.user_id == trip.user_id)
+    ).first()
+    
+    # Updated prompt format to include user preferences if available
     prompt = f"""
     Please create an itinerary for:
     
@@ -104,6 +111,20 @@ async def generate_itinerary(trip: Trip) -> str:
     - Additional Notes: {trip.additional_notes or 'None'}
     """
 
+    # Add user profile information if available
+    if user_profile:
+        prompt += f"""
+        
+        User Preferences:
+        - Traveler Type: {user_profile.traveler_type.value if user_profile.traveler_type else 'Not specified'}
+        - Activity Level: {user_profile.activity_level.value if user_profile.activity_level else 'Not specified'}
+        - Special Interests: {user_profile.special_interests or 'Not specified'}
+        - Dietary Preferences: {user_profile.dietary_preferences or 'Not specified'}
+        - Accessibility Needs: {user_profile.accessibility_needs or 'Not specified'}
+        - Preferred Languages: {user_profile.preferred_languages or 'Not specified'}
+        - Budget Preference: {user_profile.budget_preference or 'Not specified'}
+        """
+
     try:
         response = await ai_service.generate_trip_plan(prompt)
         return response
@@ -115,6 +136,150 @@ async def generate_itinerary(trip: Trip) -> str:
 def root():
     """Root endpoint - API health check"""
     return {"message": "Welcome to the Trip Planner API!"}
+
+# User Profile Endpoints
+
+@app.post("/users/profile")
+async def create_user_profile(
+    profile: UserProfile,
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    session: Session = Depends(get_session)
+):
+    """Create or update a user's profile"""
+    if not credentials or not credentials.credentials:
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    
+    auth_result = verify_token(credentials.credentials)
+    user_id = auth_result.get('sub')
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Could not determine user ID from token")
+    
+    # Check if profile already exists
+    existing_profile = session.exec(
+        select(UserProfile).where(UserProfile.user_id == user_id)
+    ).first()
+    
+    try:
+        if existing_profile:
+            # Update existing profile
+            for key, value in profile.dict(exclude_unset=True).items():
+                if key != 'id' and key != 'user_id':  # Protect these fields
+                    setattr(existing_profile, key, value)
+            existing_profile.updated_at = datetime.utcnow()
+            profile = existing_profile
+        else:
+            # Create new profile
+            profile.user_id = user_id
+            profile.created_at = datetime.utcnow()
+            profile.updated_at = datetime.utcnow()
+        
+        session.add(profile)
+        session.commit()
+        session.refresh(profile)
+        return profile
+        
+    except Exception as e:
+        session.rollback()
+        print(f"Error creating/updating profile: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/users/profile")
+async def get_user_profile(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    session: Session = Depends(get_session)
+):
+    """Get the current user's profile"""
+    if not credentials:
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    
+    auth_result = verify_token(credentials.credentials)
+    user_id = auth_result.get('sub')
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Could not determine user ID from token")
+    
+    profile = session.exec(
+        select(UserProfile).where(UserProfile.user_id == user_id)
+    ).first()
+    
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    
+    return profile
+
+@app.put("/users/profile")
+async def update_user_profile(
+    profile_update: UserProfile,
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    session: Session = Depends(get_session)
+):
+    """Update user profile"""
+    if not credentials:
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    
+    auth_result = verify_token(credentials.credentials)
+    user_id = auth_result.get('sub')
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Could not determine user ID from token")
+    
+    existing_profile = session.exec(
+        select(UserProfile).where(UserProfile.user_id == user_id)
+    ).first()
+    
+    if not existing_profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    
+    try:
+        # Update fields while protecting id and user_id
+        for key, value in profile_update.dict(exclude_unset=True).items():
+            if key != 'id' and key != 'user_id':
+                setattr(existing_profile, key, value)
+        
+        existing_profile.updated_at = datetime.utcnow()
+        session.add(existing_profile)
+        session.commit()
+        session.refresh(existing_profile)
+        return existing_profile
+        
+    except Exception as e:
+        session.rollback()
+        print(f"Error updating profile: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/users/profile")
+async def delete_user_profile(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    session: Session = Depends(get_session)
+):
+    """Delete user profile"""
+    if not credentials:
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    
+    auth_result = verify_token(credentials.credentials)
+    user_id = auth_result.get('sub')
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Could not determine user ID from token")
+    
+    existing_profile = session.exec(
+        select(UserProfile).where(UserProfile.user_id == user_id)
+    ).first()
+    
+    if not existing_profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    
+    try:
+        session.delete(existing_profile)
+        session.commit()
+        return {"message": "Profile deleted successfully"}
+    except Exception as e:
+        session.rollback()
+        print(f"Error deleting profile: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Trip Endpoints
 
 @app.post("/trips/create")
 async def create_trip(
