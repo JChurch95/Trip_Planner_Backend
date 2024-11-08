@@ -20,12 +20,9 @@ app = FastAPI(
 )
 
 origins = [
-    "http://localhost",
-    "http://localhost:5173",
-    "http://localhost:8000",
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
-    "http://localhost:3000",
+    "http://localhost:5173",  # Your frontend
+    "http://localhost:8000",  # Your backend
+    "http://127.0.0.1:5173"   # Alternative frontend URL
 ]
 
 # Add security scheme configuration
@@ -136,6 +133,95 @@ async def generate_itinerary(trip: Trip) -> str:
 def root():
     """Root endpoint - API health check"""
     return {"message": "Welcome to the Trip Planner API!"}
+
+
+
+@app.put("/trips/{trip_id}/publish")
+async def publish_trip(
+    trip_id: int,
+    publish: bool,
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    session: Session = Depends(get_session)
+):
+    """Toggle trip published status"""
+    if not credentials:
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    
+    auth_result = verify_token(credentials.credentials)
+    user_id = auth_result['sub']
+    
+    trip = session.get(Trip, trip_id)
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    if trip.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify this trip")
+    
+    trip.is_published = publish
+    session.add(trip)
+    session.commit()
+    session.refresh(trip)
+    
+    return {"message": f"Trip {'published' if publish else 'unpublished'} successfully"}
+
+@app.put("/trips/{trip_id}/favorite")
+async def favorite_trip(
+    trip_id: int,
+    favorite: bool,
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    session: Session = Depends(get_session)
+):
+    """Toggle trip favorite status"""
+    if not credentials:
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    
+    auth_result = verify_token(credentials.credentials)
+    user_id = auth_result['sub']
+    
+    trip = session.get(Trip, trip_id)
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    if trip.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify this trip")
+    
+    trip.is_favorite = favorite
+    session.add(trip)
+    session.commit()
+    session.refresh(trip)
+    
+    return {"message": f"Trip {'added to' if favorite else 'removed from'} favorites"}
+
+# Modify the existing get_trips endpoint
+@app.get("/trips/")
+async def get_trips(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    session: Session = Depends(get_session),
+    show_unpublished: bool = False,
+    favorites_only: bool = False
+):
+    """
+    Get all trips for the authenticated user.
+    Optionally filter by published status and favorites.
+    """
+    if not credentials:
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    
+    auth_result = verify_token(credentials.credentials)
+    user_id = auth_result['sub']
+    
+    query = select(Trip).where(Trip.user_id == user_id)
+    
+    if not show_unpublished:
+        query = query.where(Trip.is_published == True)
+    
+    if favorites_only:
+        query = query.where(Trip.is_favorite == True)
+    
+    trips = session.exec(query).all()
+    return trips
+
+
 
 # User Profile Endpoints
 
@@ -289,14 +375,11 @@ async def create_trip(
 ):
     """
     Create a new trip and generate its itinerary.
-    Requires authentication.
+    Returns both the message and the created trip data.
     """
     try:
-        if not credentials or not credentials.credentials:
+        if not credentials:
             raise HTTPException(status_code=403, detail="No authentication credentials provided")
-        
-        # Log the incoming request
-        print(f"Creating trip with credentials: {credentials.credentials[:20]}...")
         
         # Verify the token and get the user ID
         auth_result = verify_token(credentials.credentials)
@@ -307,7 +390,7 @@ async def create_trip(
         
         # Set the user_id from the token
         trip.user_id = user_id
-        print(f"Setting trip user_id to: {user_id}")
+        print(f"Creating trip for user: {user_id}")
         
         # Save the trip
         session.add(trip)
@@ -339,7 +422,23 @@ async def create_trip(
             day_number += 1
         
         session.commit()
-        return {"message": "Trip created successfully", "trip": trip}
+        
+        # Return both the message and the trip data
+        response_data = {
+            "message": "Trip created successfully",
+            "trip": {
+                "id": trip.id,
+                "user_id": trip.user_id,
+                "destination": trip.destination,
+                "start_date": trip.start_date.isoformat(),
+                "end_date": trip.end_date.isoformat(),
+                "is_published": trip.is_published,
+                "is_favorite": trip.is_favorite
+            }
+        }
+        
+        print("Returning response data:", response_data)
+        return response_data
     
     except HTTPException as he:
         session.rollback()

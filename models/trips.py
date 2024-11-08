@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 class Trip(Base, table=True):
     __tablename__ = "trips"
     
-    user_id: str = Field(index=True, foreign_key="user_profiles.user_id")  # Add foreign key reference
+    user_id: str = Field(index=True, foreign_key="user_profiles.user_id")
     destination: str
     start_date: date
     end_date: date
@@ -18,8 +18,8 @@ class Trip(Base, table=True):
     dietary_preferences: Optional[str] = None
     activity_preferences: Optional[str] = None
     additional_notes: Optional[str] = None
-    status: str = Field(default="pending")  # pending, completed, cancelled
+    status: str = Field(default="pending")
+    is_published: bool = Field(default=True) 
+    is_favorite: bool = Field(default=False)  
 
-    #Add relationship to UserProfile    
-    
     user_profile: Optional["UserProfile"] = Relationship(back_populates="trips")

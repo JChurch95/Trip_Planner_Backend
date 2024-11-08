@@ -16,21 +16,21 @@ class OpenAIService:
 For each itinerary, provide:
 
 1. ACCOMMODATION
-- Recommend 2-3 highly-rated hotels (4.4+ rating only)
+- Recommend 2-3 highly-rated hotels (4.4+ rating or higher)
 
 2. DAILY ITINERARY
 For each day, break down by:
 Morning:
 - Activity recommendations with times
-- Local breakfast spot (4.4+ rated)
+- Local breakfast spot (4.4+ rated or higher)
 
 Afternoon:
 - Activity recommendations with times
-- Local lunch spot (4.4+ rated)
+- Local lunch spot (4.4+ rated or higher)
 
 Evening:
 - Activity recommendations with times
-- Local dinner spot (4.4+ rated)
+- Local dinner spot (4.4+ rated or higher)
 
 3. TRAVEL TIPS
 - Weather considerations
@@ -56,6 +56,8 @@ Keep recommendations focused on local experiences and maintain a professional to
         4. Returns the AI-generated itinerary
         """
         try:
+            print(f"Generating trip plan with prompt: {user_prompt[:100]}...")
+            
             response = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -65,6 +67,9 @@ Keep recommendations focused on local experiences and maintain a professional to
                 temperature=temperature,
                 max_tokens=2185
             )
+            
+            if not response.choices:
+                raise Exception("No response generated from OpenAI")
             
             return response.choices[0].message.content
             
@@ -83,18 +88,26 @@ Keep recommendations focused on local experiences and maintain a professional to
         It lets users ask follow-up questions and get more details.
         """
         try:
+            if not messages:
+                raise ValueError("No messages provided")
+                
             if not any(msg.get('role') == 'system' for msg in messages):
                 messages.insert(0, {
                     "role": "system",
                     "content": OpenAIService.SYSTEM_INSTRUCTIONS
                 })
 
+            print(f"Generating chat response for {len(messages)} messages...")
+            
             response = client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=2185
             )
+            
+            if not response.choices:
+                raise Exception("No response generated from OpenAI")
             
             return response.choices[0].message.content
             
