@@ -19,11 +19,33 @@ class ActivityLevel(str, Enum):
     ACTIVE = "active"
 
 class BudgetPreference(str, Enum):
-    BUDGET = "daily_budget_50_100"           # Daily budget $50-100 
-    COMFORT = "daily_budget_100_200"         # Daily budget $100-200
-    PREMIUM = "daily_budget_200_500"         # Daily budget $200-500
-    LUXURY = "daily_budget_500_1000"         # Daily budget $500-1000
-    ULTRA_LUXURY = "daily_budget_1000_plus"  # Daily budget $1000+
+    BUDGET = "BUDGET"           # $50-100 per day
+    COMFORT = "COMFORT"         # $100-200 per day 
+    PREMIUM = "PREMIUM"         # $200-500 per day
+    LUXURY = "LUXURY"           # $500-1000 per day
+    ULTRA_LUXURY = "ULTRA_LUXURY"  # $1000+ per day
+
+    def get_budget_range(self) -> tuple[int, int]:
+        """Returns the daily budget range in USD for this preference level"""
+        ranges = {
+            "BUDGET": (50, 100),
+            "COMFORT": (100, 200),
+            "PREMIUM": (200, 500),
+            "LUXURY": (500, 1000),
+            "ULTRA_LUXURY": (1000, float('inf'))
+        }
+        return ranges[self.value]
+    
+    def get_description(self) -> str:
+        """Returns a human-readable description of this budget level"""
+        descriptions = {
+            "BUDGET": "Budget-friendly options, $50-100 per day",
+            "COMFORT": "Mid-range comfort, $100-200 per day",
+            "PREMIUM": "Premium experiences, $200-500 per day",
+            "LUXURY": "Luxury accommodations and dining, $500-1000 per day",
+            "ULTRA_LUXURY": "Ultra-luxury with no expense spared, $1000+ per day"
+        }
+        return descriptions[self.value]
 
 
 class UserProfile(Base, table=True):
