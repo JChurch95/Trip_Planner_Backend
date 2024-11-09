@@ -451,10 +451,13 @@ async def create_trip(
 @app.get("/trips/")
 async def get_trips(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    show_unpublished: bool = False,
+    favorites_only: bool = False
 ):
     """
     Get all trips for the authenticated user.
+    Optionally filter by published status and favorites.
     """
     if not credentials:
         raise HTTPException(status_code=403, detail="Not authenticated")
@@ -462,7 +465,16 @@ async def get_trips(
     auth_result = verify_token(credentials.credentials)
     user_id = auth_result['sub']
     
-    trips = session.exec(select(Trip).where(Trip.user_id == user_id)).all()
+    query = select(Trip).where(Trip.user_id == user_id)
+    
+    # If show_unpublished is False, only show published trips
+    if not show_unpublished:
+        query = query.where(Trip.is_published == True)
+    
+    if favorites_only:
+        query = query.where(Trip.is_favorite == True)
+    
+    trips = session.exec(query).all()
     return trips
 
 @app.get("/trips/{trip_id}")
