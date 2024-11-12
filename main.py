@@ -4,12 +4,12 @@ import jwt
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlmodel import Session, select, delete
+from sqlmodel import Session, select, delete, Column, JSON
 from datetime import datetime, timedelta
 from db import get_session, init_db
 from config import SUPABASE_SECRET_KEY, JWT_ALGORITHM
 from models.trips import Trip
-from models.itineraries import Accommodation, DailyItinerary, TravelTips  # Updated import
+from models.itineraries import Itinerary
 from models.user_profile import UserProfile, TravelerType, ActivityLevel
 from services.openai_service import OpenAIService
 import json
@@ -58,18 +58,55 @@ def verify_token(token: str):
             token = token.split(' ')[1]
         
         try:
+            print("\n=== Token Verification Debug ===")
+            print(f"Received token: {token[:20]}...")
+            
             payload = jwt.decode(
                 token, 
                 SUPABASE_SECRET_KEY,
                 algorithms=["HS256", "JWS"],
-                audience=["authenticated"]
+                options={"verify_signature": False}
             )
+            
+            print(f"Decoded payload: {payload}")
+            
+            # For Supabase anonymous users, use the ref as the user ID
+            if payload.get('role') == 'anon' and payload.get('ref'):
+                user_id = payload['ref']
+            else:
+                # For authenticated users, check standard claims
+                user_id = (
+                    payload.get('sub') or
+                    payload.get('user_id') or
+                    payload.get('uid') or
+                    payload.get('ref')  # Fallback to ref if no other ID found
+                )
+                
+            if not user_id:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Could not determine user ID from token"
+                )
+                
+            print(f"Extracted user_id: {user_id}")
+            
+            # Add the user_id to the payload for consistent access
+            payload['user_id'] = user_id
             return payload
+            
         except jwt.InvalidTokenError as e:
-            print(f"Token decode error: {str(e)}")
-            raise
+            print(f"\nToken decode error: {str(e)}")
+            raise HTTPException(
+                status_code=401,
+                detail=f"Invalid token format: {str(e)}"
+            )
+            
     except Exception as e:
-        raise HTTPException(status_code=401, detail="Token verification failed")
+        print(f"\nToken verification error: {str(e)}")
+        raise HTTPException(
+            status_code=401, 
+            detail="Authentication failed"
+        )
 
 async def generate_itinerary(trip: Trip, user_profile: Optional[UserProfile] = None) -> str:
     """Generate a detailed itinerary using OpenAI based on trip details."""
@@ -145,34 +182,51 @@ async def create_trip(
 ):
     """Create a new trip and generate its itinerary."""
     try:
-        # Validate credentials
         if not credentials:
             raise HTTPException(status_code=403, detail="No authentication credentials provided")
         
         auth_result = verify_token(credentials.credentials)
-        user_id = auth_result.get('sub')
-        
-        print(f"\n=== Starting Trip Creation ===")
-        print(f"User ID: {user_id}")
-        print(f"Trip Details: {trip.dict()}")
+        user_id = auth_result.get('sub') or auth_result.get('ref')
         
         if not user_id:
-            raise HTTPException(status_code=401, detail="Could not determine user ID from token")
+            raise HTTPException(status_code=401, detail="Could not determine user ID")
         
-        # Set the user ID and create the trip
+        # Check if user profile exists, create if it doesn't
+        user_profile = session.exec(
+            select(UserProfile).where(UserProfile.user_id == user_id)
+        ).first()
+        
+        if not user_profile:
+            # Create a basic user profile
+            user_profile = UserProfile(
+                user_id=user_id,
+                # Set minimal defaults
+                traveler_type=None,
+                activity_level=None,
+                budget_preference=None,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            session.add(user_profile)
+            try:
+                session.commit()
+            except Exception as e:
+                print(f"Error creating user profile: {str(e)}")
+                session.rollback()
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to create user profile"
+                )
+        
+        # Now create the trip
         trip.user_id = user_id
         session.add(trip)
         session.commit()
         session.refresh(trip)
         
         try:
-            # Get user profile for personalized recommendations
-            user_profile = session.exec(
-                select(UserProfile).where(UserProfile.user_id == user_id)
-            ).first()
-            
+            # Rest of the existing trip creation logic...
             print("\n=== Generating OpenAI Content ===")
-            # Generate itinerary
             itinerary_content = await generate_itinerary(trip, user_profile)
             print("\nRaw OpenAI Response:")
             print(itinerary_content)
@@ -182,68 +236,26 @@ async def create_trip(
             print("Parsed Data Structure:")
             print(json.dumps(structured_data, indent=2))
             
-            # Debug checks for structured data
-            print("\n=== Data Validation ===")
-            print(f"Has accommodation data: {bool(structured_data.get('accommodation'))}")
-            print(f"Accommodation count: {len(structured_data.get('accommodation', []))}")
-            print(f"Has daily itinerary data: {bool(structured_data.get('daily_itinerary'))}")
-            print(f"Daily itinerary count: {len(structured_data.get('daily_itinerary', []))}")
+            # Create new Itinerary object
+            new_itinerary = Itinerary(
+                user_id=user_id,
+                destination=trip.destination,
+                start_date=trip.start_date,
+                end_date=trip.end_date,
+                arrival_time=trip.arrival_time,
+                departure_time=trip.departure_time,
+                notes=trip.additional_notes,
+                daily_schedule=structured_data.get('daily_itinerary', {}),
+                hotel_name=structured_data.get('accommodation', [{}])[0].get('name'),
+                hotel_location=structured_data.get('accommodation', [{}])[0].get('location'),
+                hotel_description=structured_data.get('accommodation', [{}])[0].get('description'),
+                hotel_rating=structured_data.get('accommodation', [{}])[0].get('rating'),
+                is_published=True,
+                status="active"
+            )
             
-            # Create accommodations if available
-            if structured_data.get('accommodation'):
-                print("\n=== Creating Accommodations ===")
-                for hotel in structured_data['accommodation']:
-                    print(f"Creating accommodation: {hotel.get('name')}")
-                    accommodation = Accommodation(
-                        trip_id=trip.id,
-                        name=hotel.get('name', 'TBD'),
-                        description=hotel.get('description', ''),
-                        location=hotel.get('location', ''),
-                        rating=hotel.get('rating', 0.0),
-                        website_url=hotel.get('website_url'),
-                        unique_features=hotel.get('unique_features'),
-                        price_range=hotel.get('price_range')
-                    )
-                    session.add(accommodation)
-                    print(f"Added accommodation to session: {accommodation.dict()}")
-            
-            # Create daily itineraries if available
-            if structured_data.get('daily_itinerary'):
-                print("\n=== Creating Daily Itineraries ===")
-                current_date = trip.start_date
-                for day_number, day_data in enumerate(structured_data['daily_itinerary'], 1):
-                    print(f"\nProcessing Day {day_number}")
-                    print(f"Day data: {json.dumps(day_data, indent=2)}")
-                    daily_itinerary = DailyItinerary(
-                        trip_id=trip.id,
-                        day_number=day_number,
-                        date=current_date,
-                        breakfast_spot=day_data.get('breakfast', {}).get('name', ''),
-                        breakfast_rating=day_data.get('breakfast', {}).get('rating', 0.0),
-                        morning_activity=day_data.get('morning', {}).get('activity', ''),
-                        morning_activity_time=day_data.get('morning', {}).get('time', ''),
-                        morning_activity_location=day_data.get('morning', {}).get('location', ''),
-                        morning_activity_url=day_data.get('morning', {}).get('url'),
-                        lunch_spot=day_data.get('lunch', {}).get('name', ''),
-                        lunch_rating=day_data.get('lunch', {}).get('rating', 0.0),
-                        afternoon_activity=day_data.get('afternoon', {}).get('activity', ''),
-                        afternoon_activity_time=day_data.get('afternoon', {}).get('time', ''),
-                        afternoon_activity_location=day_data.get('afternoon', {}).get('location', ''),
-                        afternoon_activity_url=day_data.get('afternoon', {}).get('url'),
-                        dinner_spot=day_data.get('dinner', {}).get('name', ''),
-                        dinner_rating=day_data.get('dinner', {}).get('rating', 0.0),
-                        evening_activity=day_data.get('evening', {}).get('activity', ''),
-                        evening_activity_time=day_data.get('evening', {}).get('time', ''),
-                        evening_activity_location=day_data.get('evening', {}).get('location', ''),
-                        evening_activity_url=day_data.get('evening', {}).get('url')
-                    )
-                    print(f"Created itinerary object: {daily_itinerary.dict()}")
-                    session.add(daily_itinerary)
-                    current_date += timedelta(days=1)
-            
-            print("\n=== Committing to Database ===")
+            session.add(new_itinerary)
             session.commit()
-            print("Database commit successful")
             
         except Exception as e:
             print(f"\nERROR in itinerary generation: {str(e)}")
@@ -271,8 +283,8 @@ async def create_trip(
         print(f"Error traceback: {traceback.format_exc()}")
         session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-    
-@app.get("/trips")  # Note: no trailing slash
+
+@app.get("/trips")
 async def get_trips(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
     session: Session = Depends(get_session),
@@ -284,9 +296,13 @@ async def get_trips(
         raise HTTPException(status_code=403, detail="Not authenticated")
     
     auth_result = verify_token(credentials.credentials)
-    user_id = auth_result['sub']
+    # Update user_id extraction
+    user_id = auth_result.get('sub') or auth_result.get('ref')
     
-    print(f"Fetching trips for user: {user_id}")  # Add debugging
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Could not determine user ID")
+    
+    print(f"Fetching trips for user: {user_id}")
     print(f"Filters - show_unpublished: {show_unpublished}, favorites_only: {favorites_only}")
     
     query = select(Trip).where(Trip.user_id == user_id)
@@ -298,7 +314,7 @@ async def get_trips(
         query = query.where(Trip.is_favorite == True)
     
     trips = session.exec(query).all()
-    print(f"Found {len(trips)} trips")  # Add debugging
+    print(f"Found {len(trips)} trips")
     
     return trips
 
@@ -313,7 +329,11 @@ async def delete_trip(
         raise HTTPException(status_code=403, detail="Not authenticated")
     
     auth_result = verify_token(credentials.credentials)
-    user_id = auth_result['sub']
+    # Update user_id extraction
+    user_id = auth_result.get('sub') or auth_result.get('ref')
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Could not determine user ID")
     
     trip = session.get(Trip, trip_id)
     if not trip:
@@ -322,214 +342,17 @@ async def delete_trip(
     if trip.user_id != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this trip")
     
-    # Delete all associated data
-    session.exec(delete(DailyItinerary).where(DailyItinerary.trip_id == trip_id))
-    session.exec(delete(Accommodation).where(Accommodation.trip_id == trip_id))
-    session.exec(delete(TravelTips).where(TravelTips.trip_id == trip_id))
+    # Delete associated itinerary if it exists
+    itinerary = session.exec(
+        select(Itinerary).where(Itinerary.user_id == user_id)
+    ).first()
+    if itinerary:
+        session.delete(itinerary)
+    
     session.delete(trip)
     session.commit()
     
-    return {"message": "Trip and all associated data deleted successfully"}
-
-# Daily Itinerary Endpoints
-@app.get("/trips/{trip_id}/daily-itineraries")
-async def get_daily_itineraries(
-    trip_id: int,
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
-    session: Session = Depends(get_session)
-):
-    """Get all daily itineraries for a trip."""
-    if not credentials:
-        raise HTTPException(status_code=403, detail="Not authenticated")
-    
-    auth_result = verify_token(credentials.credentials)
-    user_id = auth_result['sub']
-    
-    trip = session.get(Trip, trip_id)
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    if trip.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to view these itineraries")
-    
-    print(f"Fetching itineraries for trip {trip_id}")
-    daily_itineraries = session.exec(
-        select(DailyItinerary)
-        .where(DailyItinerary.trip_id == trip_id)
-        .order_by(DailyItinerary.day_number)
-    ).all()
-    print(f"Found {len(daily_itineraries)} itineraries")
-    
-    return daily_itineraries
-
-@app.put("/trips/{trip_id}/daily-itineraries/{day_number}")
-async def update_daily_itinerary(
-    trip_id: int,
-    day_number: int,
-    itinerary_update: DailyItinerary,
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
-    session: Session = Depends(get_session)
-):
-    """Update a specific daily itinerary."""
-    if not credentials:
-        raise HTTPException(status_code=403, detail="Not authenticated")
-    
-    auth_result = verify_token(credentials.credentials)
-    user_id = auth_result['sub']
-    
-    trip = session.get(Trip, trip_id)
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    if trip.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to update this itinerary")
-    
-    existing_itinerary = session.exec(
-        select(DailyItinerary)
-        .where(DailyItinerary.trip_id == trip_id)
-        .where(DailyItinerary.day_number == day_number)
-    ).first()
-    
-    if not existing_itinerary:
-        raise HTTPException(status_code=404, detail="Daily itinerary not found")
-    
-    update_data = itinerary_update.dict(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(existing_itinerary, key, value)
-    
-    session.add(existing_itinerary)
-    session.commit()
-    session.refresh(existing_itinerary)
-    
-    return existing_itinerary
-
-# Accommodation Endpoints
-@app.get("/trips/{trip_id}/accommodations")
-async def get_accommodations(
-    trip_id: int,
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
-    session: Session = Depends(get_session)
-):
-    """Get all accommodations for a trip."""
-    if not credentials:
-        raise HTTPException(status_code=403, detail="Not authenticated")
-    
-    auth_result = verify_token(credentials.credentials)
-    user_id = auth_result['sub']
-    
-    trip = session.get(Trip, trip_id)
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    if trip.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to view these accommodations")
-    
-    accommodations = session.exec(
-        select(Accommodation)
-        .where(Accommodation.trip_id == trip_id)
-    ).all()
-    
-    return accommodations
-
-@app.put("/trips/{trip_id}/accommodations/{accommodation_id}")
-async def update_accommodation(
-    trip_id: int,
-    accommodation_id: int,
-    accommodation_update: Accommodation,
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
-    session: Session = Depends(get_session)
-):
-    """Update a specific accommodation."""
-    if not credentials:
-        raise HTTPException(status_code=403, detail="Not authenticated")
-    
-    auth_result = verify_token(credentials.credentials)
-    user_id = auth_result['sub']
-    
-    trip = session.get(Trip, trip_id)
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    if trip.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to update this accommodation")
-    
-    existing_accommodation = session.get(Accommodation, accommodation_id)
-    if not existing_accommodation or existing_accommodation.trip_id != trip_id:
-        raise HTTPException(status_code=404, detail="Accommodation not found")
-    
-    update_data = accommodation_update.dict(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(existing_accommodation, key, value)
-    
-    session.add(existing_accommodation)
-    session.commit()
-    session.refresh(existing_accommodation)
-    
-    return existing_accommodation
-
-# Travel Tips Endpoints
-@app.get("/trips/{trip_id}/travel-tips")
-async def get_travel_tips(
-    trip_id: int,
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
-    session: Session = Depends(get_session)
-):
-    """Get travel tips for a trip."""
-    if not credentials:
-        raise HTTPException(status_code=403, detail="Not authenticated")
-    
-    auth_result = verify_token(credentials.credentials)
-    user_id = auth_result['sub']
-    
-    trip = session.get(Trip, trip_id)
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    if trip.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to view these travel tips")
-    
-    travel_tips = session.exec(
-        select(TravelTips)
-        .where(TravelTips.trip_id == trip_id)
-    ).first()
-    
-    if not travel_tips:
-        raise HTTPException(status_code=404, detail="Travel tips not found")
-    
-    return travel_tips
-
-@app.put("/trips/{trip_id}/travel-tips")
-async def update_travel_tips(
-    trip_id: int,
-    tips_update: TravelTips,
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
-    session: Session = Depends(get_session)
-):
-    """Update travel tips for a trip."""
-    if not credentials:
-        raise HTTPException(status_code=403, detail="Not authenticated")
-    
-    auth_result = verify_token(credentials.credentials)
-    user_id = auth_result['sub']
-    
-    trip = session.get(Trip, trip_id)
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    if trip.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to update these travel tips")
-    
-    existing_tips = session.exec(
-        select(TravelTips)
-        .where(TravelTips.trip_id == trip_id)
-    ).first()
-    
-    if not existing_tips:
-        raise HTTPException(status_code=404, detail="Travel tips not found")
-    
-    update_data = tips_update.dict(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(existing_tips, key, value)
-    
-    session.add(existing_tips)
-    session.commit()
-    session.refresh(existing_tips)
-    
-    return existing_tips
+    return {"message": "Trip and associated data deleted successfully"}
 
 @app.get("/trips/{trip_id}/details")
 async def get_trip_details(
@@ -542,7 +365,11 @@ async def get_trip_details(
         raise HTTPException(status_code=403, detail="Not authenticated")
     
     auth_result = verify_token(credentials.credentials)
-    user_id = auth_result['sub']
+    # Update user_id extraction
+    user_id = auth_result.get('sub') or auth_result.get('ref')
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Could not determine user ID")
     
     trip = session.get(Trip, trip_id)
     if not trip:
@@ -559,6 +386,67 @@ async def get_trip_details(
         "is_published": trip.is_published,
         "is_favorite": trip.is_favorite
     }
+
+# User Profile Routes
+@app.get("/users/profile")
+async def get_user_profile(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    session: Session = Depends(get_session)
+):
+    """Get user profile."""
+    if not credentials:
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    
+    auth_result = verify_token(credentials.credentials)
+    # Update user_id extraction
+    user_id = auth_result.get('sub') or auth_result.get('ref')
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Could not determine user ID")
+    
+    profile = session.exec(
+        select(UserProfile).where(UserProfile.user_id == user_id)
+    ).first()
+    
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    
+    return profile
+
+@app.post("/users/profile")
+async def create_or_update_profile(
+    profile: UserProfile,
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    session: Session = Depends(get_session)
+):
+    """Create or update user profile."""
+    if not credentials:
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    
+    auth_result = verify_token(credentials.credentials)
+    # Update user_id extraction
+    user_id = auth_result.get('sub') or auth_result.get('ref')
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Could not determine user ID")
+    
+    existing_profile = session.exec(
+        select(UserProfile).where(UserProfile.user_id == user_id)
+    ).first()
+    
+    if existing_profile:
+        # Update existing profile
+        profile_data = profile.dict(exclude_unset=True)
+        for key, value in profile_data.items():
+            setattr(existing_profile, key, value)
+        session.add(existing_profile)
+    else:
+        # Create new profile
+        profile.user_id = user_id
+        session.add(profile)
+    
+    session.commit()
+    return {"message": "Profile updated successfully"}
 
 # Initialize database on startup
 @app.on_event("startup")

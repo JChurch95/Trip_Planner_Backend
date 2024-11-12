@@ -9,50 +9,131 @@ from datetime import datetime, date
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 class OpenAIService:
-    # Keep your original system instructions exactly as they were
-    SYSTEM_INSTRUCTIONS = """You are a travel planner. Create personalized, easy-to-read itinerary based on the user's:
+    SYSTEM_INSTRUCTIONS = """You are a travel planner. Create personalized, easy-to-read itineraries based on the user's:
 - Destination city
 - Trip duration
 - Interests and travel preferences
+- Budget constraints (strictly adhere to these)
 - Profile settings
 - Local events during their stay
 - Weather conditions
 
-For each itinerary, provide the following:
+BUDGET CATEGORIES AND GUIDELINES:
+- BUDGET ($50-100 per day):
+  * Hotels: Quality budget accommodations ($20-40/night)
+    - Well-rated hostels
+    - Guesthouses
+    - B&Bs
+    - Budget hotels
+    Only venues with a user rating of 4.0 or higher (out of 5) will be selected.
+  * Meals: Local eateries, street food, casual restaurants ($10-20/meal)
+  * Activities: Free or low-cost attractions, walking tours, public spaces
+
+- COMFORT ($100-200 per day):
+  * Hotels: Mid-range accommodations ($40-80/night)
+    - Quality 2-3 star hotels
+    - Boutique guesthouses
+    - Serviced apartments
+    - Small boutique hotels
+    Only venues with a user rating of 4.0 or higher (out of 5) will be selected.
+  * Meals: Mid-range restaurants, casual dining ($20-40/meal)
+  * Activities: Mix of paid attractions and free activities
+
+- PREMIUM ($200-500 per day):
+  * Hotels: High-end accommodations ($80-200/night)
+    - Quality 3-4 star hotels
+    - Boutique hotels
+    - Luxury apartments
+    - Small luxury properties
+    Only venues with a user rating of 4.0 or higher (out of 5) will be selected.
+  * Meals: Fine dining, trendy restaurants ($40-80/meal)
+  * Activities: Premium experiences, guided tours, special events
+
+- LUXURY ($500-1000 per day):
+  * Hotels: Luxury accommodations ($200-400/night)
+    - 4-5 star hotels
+    - Luxury boutique hotels
+    - High-end resorts
+    - Premium luxury apartments
+    Only venues with a user rating of 4.0 or higher (out of 5) will be selected.
+  * Meals: High-end restaurants, michelin-starred venues ($80-150/meal)
+  * Activities: VIP experiences, private tours, exclusive access
+
+- ULTRA_LUXURY ($1000+ per day):
+  * Hotels: Ultra-luxury accommodations ($400+/night)
+    - 5-star hotels and resorts
+    - Presidential suites
+    - Exclusive luxury properties
+    - Private villas
+    Only venues with a user rating of 4.0 or higher (out of 5) will be selected.
+  * Meals: World-class restaurants, private dining ($150+/meal)
+  * Activities: Ultra-exclusive experiences, private guides, helicopter tours
+
+IMPORTANT NOTE ABOUT ACCOMMODATIONS:
+- All recommended accommodations MUST have user ratings of 4.2+ out of 5 on major travel platforms
+- Star ratings (1-5 stars) indicate the official classification based on facilities/amenities
+- User ratings 4.0 or higher (out of 5) reflect actual guest experiences and satisfaction
+- Focus on finding accommodations that match both the budget category AND maintain high user ratings
+- Consider factors like:
+  * Recent renovations
+  * Superior service
+  * Excellent location
+  * Outstanding cleanliness
+  * Great value for money within their category
+
+For each itinerary, provide the following within the specified budget category:
 
 1. ACCOMMODATION (List exactly 3 hotels)
-- List 3 highly-rated hotels with ratings of 4.4 and higher
-- Include brief description, location, and unique features
-- Make hotel names clickable links to their websites
-- For each hotel provide: name, URL, description, location, rating, and any unique features
+For each hotel, provide:
+- Name with clickable website link
+- Detailed description (2-3 sentences about amenities, style, and atmosphere)
+- Precise location and proximity to attractions
+- Official star rating (if applicable)
+- User rating (MUST be 4.0 or higher (out of 5))
+- Unique features or special offerings
+- Price range category (must match user's budget preference)
+- Typical nightly rate
 
 2. DAILY ITINERARY
-For each day, organize recommendations into three sections:
+For each day, organize detailed recommendations into three sections:
 
 Morning:
-- Breakfast: Popular local spot (4.4+ rating)
-- Activity (Time): Description and location with clickable website link
+- Breakfast: Restaurant name (rating) - Include 1-2 sentences about cuisine style, atmosphere, and popular dishes
+- Activity: Name (Time) @ Location
+  * Detailed description of the activity (2-3 sentences)
+  * What makes it special or worth visiting
+  * Practical tips for visiting
+  * Website link if applicable
 
 Afternoon:
-- Lunch: Top-rated spot (4.4+ rating)
-- Activity (Time): Description and location with clickable website link
+- Lunch: Restaurant name (rating) - Include 1-2 sentences about cuisine style, atmosphere, and signature dishes
+- Activity: Name (Time) @ Location
+  * Detailed description of the activity (2-3 sentences)
+  * Historical or cultural significance
+  * What visitors can expect to see/do
+  * Website link if applicable
 
 Evening:
-- Dinner: Popular spot (4.4+ rating)
-- Activity (Time): Description and location with clickable website link
+- Dinner: Restaurant name (rating) - Include 1-2 sentences about cuisine style, ambiance, and must-try dishes
+- Activity: Name (Time) @ Location
+  * Detailed description of the activity (2-3 sentences)
+  * Why it's worth experiencing
+  * What makes it unique
+  * Website link if applicable
 
 3. TRAVEL TIPS
-- Weather Considerations: Expected conditions and clothing suggestions
-- Local Transportation: Navigation tips
-- Cultural Etiquette: Essential customs and practices
-- Seasonal Events: Special events during the visit
+- Weather Considerations: Detailed expected conditions and specific clothing suggestions
+- Local Transportation: Comprehensive navigation tips including costs and recommended methods
+- Cultural Etiquette: Essential customs, practices, and behavioral tips
+- Seasonal Events: Special events during the visit with dates and brief descriptions, with website link if applicable
 
-Ensure all recommendations are:
-- Verified with 4.4+ ratings
-- Include accurate timings
-- Geographically logical to minimize travel time
-- Aligned with user preferences and budget
-- Include clickable website links where applicable"""
+Ensure all recommendations:
+- Have ratings of 4.4 or higher
+- Include accurate timings and durations
+- Are geographically logical to minimize travel time
+- Align with user preferences and budget
+- Include clickable website links where applicable
+- Have detailed descriptions for all venues and activities"""
 
     @staticmethod
     async def generate_trip_plan(prompt: str) -> str:
@@ -65,7 +146,7 @@ Ensure all recommendations are:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=3500
+                max_tokens=4000  # Increased token limit to accommodate more detailed descriptions
             )
             
             if not response.choices:
@@ -79,238 +160,249 @@ Ensure all recommendations are:
 
     @staticmethod
     def parse_itinerary_response(response_text: str) -> dict:
-        """Parse OpenAI response to match database models exactly."""
+        """Parse OpenAI response into structured data matching the itinerary model."""
         print("\n=== Starting Response Parsing ===")
         
         def extract_link_data(text: str) -> tuple[str, Optional[str]]:
-            """Extract name and URL from markdown link."""
-            match = re.match(r'\[(.*?)\]\((.*?)\)', text)
-            return (match.group(1).strip(), match.group(2).strip()) if match else (text.strip(), None)
-        
+            """Extract name and URL from markdown link format."""
+            link_pattern = r'\[(.*?)\]\((.*?)\)'
+            match = re.search(link_pattern, text)
+            if match:
+                return match.group(1).strip(), match.group(2).strip()
+            return text.strip(), None
+
         def extract_rating(text: str) -> float:
             """Extract rating value from text."""
-            try:
-                match = re.search(r'\((\d+\.\d+)\)', text)
-                return float(match.group(1)) if match else 0.0
-            except (ValueError, AttributeError):
-                return 0.0
+            rating_pattern = r'(\d+\.\d+)'
+            match = re.search(rating_pattern, text)
+            return float(match.group(1)) if match else 0.0
 
-        def parse_accommodation(text: str) -> dict:
-            """Parse hotel details to match Accommodation model."""
-            lines = text.strip().split('\n')
-            hotel = {
-                'name': '',
-                'description': '',
-                'location': '',
-                'rating': 0.0,
-                'website_url': None,
-                'unique_features': None,
-                'price_range': None
-            }
+        def extract_description(text: str) -> str:
+            """Extract description from text after the rating or initial identifier."""
+            # First, remove any markdown links
+            text = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', text)
+            # Then remove the rating if present
+            text = re.sub(r'\(\d+\.?\d*\)', '', text)
+            # Remove any leading identifiers like "Breakfast:", "Activity:", etc.
+            text = re.sub(r'^(Breakfast|Lunch|Dinner|Activity|Morning|Afternoon|Evening):\s*', '', text)
+            # Clean up and return the remaining text
+            return text.strip()
+
+        def parse_accommodation(text: str) -> list[dict]:
+            """Parse hotel details into structured format."""
+            hotels = []
+            current_hotel = None
+            description_buffer = []
             
-            name_line = next((line for line in lines if '[' in line and ']' in line), None)
-            if name_line:
-                hotel['name'], hotel['website_url'] = extract_link_data(name_line)
-                
-            description_text = []
+            lines = text.split('\n')
             for line in lines:
                 line = line.strip()
-                if line.startswith('-'):
-                    line = line[1:].strip()
+                if not line or line.lower() == "accommodation":
+                    continue
+
+                # Check for new hotel entry
+                if re.match(r'^\d+\.', line):
+                    if current_hotel:
+                        current_hotel['description'] = ' '.join(description_buffer)
+                        hotels.append(current_hotel)
                     
-                if 'rating' in line.lower():
-                    hotel['rating'] = extract_rating(line)
-                elif 'location' in line.lower():
-                    hotel['location'] = line.split(':', 1)[1].strip() if ':' in line else ''
-                elif 'unique features' in line.lower():
-                    hotel['unique_features'] = line.split(':', 1)[1].strip() if ':' in line else ''
-                elif 'description' in line.lower():
-                    description_text.append(line.split(':', 1)[1].strip() if ':' in line else '')
+                    name, url = extract_link_data(line.split('.', 1)[1].strip())
+                    current_hotel = {
+                        "name": name,
+                        "website": url,
+                        "description": "",
+                        "location": "",
+                        "rating": 0.0,
+                        "unique_features": ""
+                    }
+                    description_buffer = []
+                elif current_hotel:
+                    if line.startswith('-'):
+                        detail = line[1:].strip()
+                        if ':' in detail:
+                            key, value = detail.split(':', 1)
+                            key = key.lower().strip()
+                            value = value.strip()
+                            
+                            if 'rating' in key:
+                                current_hotel['rating'] = extract_rating(value)
+                            elif 'location' in key:
+                                current_hotel['location'] = value
+                            elif 'unique feature' in key:
+                                current_hotel['unique_features'] = value
+                            else:
+                                description_buffer.append(value)
+                        else:
+                            description_buffer.append(detail)
             
-            hotel['description'] = ' '.join(description_text)
-            return hotel
+            # Don't forget the last hotel
+            if current_hotel:
+                current_hotel['description'] = ' '.join(description_buffer)
+                hotels.append(current_hotel)
+            
+            return hotels
 
-        def parse_activity(text: str) -> tuple[str, str, str, Optional[str]]:
-            """Parse activity details to match model fields exactly."""
-            activity = ""
-            time = ""
-            location = ""
-            url = None
-            
-            # Extract name and URL
-            name_match = re.search(r'\[(.*?)\]\((.*?)\)', text)
-            if name_match:
-                activity = name_match.group(1).strip()
-                url = name_match.group(2).strip()
-            
-            # Extract time (HH:MM AM/PM format)
-            time_match = re.search(r'\(([\d:]+(?:\s*[AaPp][Mm])?(?:\s*-\s*[\d:]+(?:\s*[AaPp][Mm])?)?)\)', text)
-            if time_match:
-                time = time_match.group(1).strip()
-            
-            # Extract location after @
-            location_match = re.search(r'@\s*([^(]+)', text)
-            if location_match:
-                location = location_match.group(1).strip()
-            
-            return activity, time, location, url
+        def parse_daily_activities(text: str) -> list[dict]:
+            """Parse daily activities into structured format."""
+            daily_schedule = []
+            current_day = None
+            current_section = None
+            day_pattern = re.compile(r'Day (\d+) - (\d{4}-\d{2}-\d{2}):')
+            section_patterns = {
+                'breakfast': re.compile(r'Breakfast:\s*(.*?)(?=\n|$)', re.DOTALL),
+                'morning_activity': re.compile(r'Morning Activity:\s*(.*?)(?=\n|$)', re.DOTALL),
+                'lunch': re.compile(r'Lunch:\s*(.*?)(?=\n|$)', re.DOTALL),
+                'afternoon_activity': re.compile(r'Afternoon Activity:\s*(.*?)(?=\n|$)', re.DOTALL),
+                'dinner': re.compile(r'Dinner:\s*(.*?)(?=\n|$)', re.DOTALL),
+                'evening_activity': re.compile(r'Evening Activity:\s*(.*?)(?=\n|$)', re.DOTALL)
+            }
 
-        def parse_meal(text: str) -> tuple[str, float, Optional[str]]:
-            """Parse meal details to match model fields exactly."""
-            name, url = extract_link_data(text)
-            rating = extract_rating(text)
-            return name, rating, url
-
-        try:
-            sections = {
-                'accommodation': [],
-                'daily_itinerary': [],
-                'travel_tips': {
-                    'weather_summary': '',
-                    'transportation_tips': '',
-                    'cultural_notes': '',
-                    'seasonal_events': None
+            def parse_meal(text: str) -> dict:
+                """Parse meal details including name and rating."""
+                # Look for rating in parentheses, e.g. "Restaurant Name (4.5)"
+                rating_match = re.search(r'\(([\d.]+)\)', text)
+                rating = float(rating_match.group(1)) if rating_match else 0.0
+                # Remove rating from name if present
+                name = re.sub(r'\s*\([\d.]+\)', '', text).strip()
+                # Get description if available (after the dash or hyphen)
+                parts = name.split(' - ', 1)
+                spot = parts[0].strip()
+                description = parts[1].strip() if len(parts) > 1 else ""
+                return {
+                    "spot": spot,
+                    "rating": rating,
+                    "description": description
                 }
+
+            def parse_activity(text: str) -> dict:
+                """Parse activity details including time and location."""
+                # Pattern for time in parentheses and location after @
+                time_match = re.search(r'\((.*?)\)', text)
+                location_match = re.search(r'@\s*(.*?)(?=\.|$)', text)
+                
+                # Extract URL if present
+                url_match = re.search(r'\[(.*?)\]\((.*?)\)', text)
+                if url_match:
+                    activity = url_match.group(1)
+                    url = url_match.group(2)
+                else:
+                    # Remove time and location portions to get activity name
+                    activity = text.split('(')[0].strip()
+                    url = None
+                    
+                return {
+                    "activity": activity,
+                    "time": time_match.group(1) if time_match else "",
+                    "location": location_match.group(1).strip() if location_match else "",
+                    "url": url
+                }
+
+            # Split text into days
+            days = text.split('\nDay ')
+            for day_text in days:
+                if not day_text.strip():
+                    continue
+                    
+                if not day_text.startswith('Day '):
+                    day_text = 'Day ' + day_text
+
+                day_match = day_pattern.search(day_text)
+                if day_match:
+                    if current_day:
+                        daily_schedule.append(current_day)
+
+                    current_day = {
+                        "day_number": int(day_match.group(1)),
+                        "date": day_match.group(2),
+                        "breakfast": {"spot": "", "rating": 0.0, "description": ""},
+                        "morning_activity": {"activity": "", "time": "", "location": "", "url": None},
+                        "lunch": {"spot": "", "rating": 0.0, "description": ""},
+                        "afternoon_activity": {"activity": "", "time": "", "location": "", "url": None},
+                        "dinner": {"spot": "", "rating": 0.0, "description": ""},
+                        "evening_activity": {"activity": "", "time": "", "location": "", "url": None}
+                    }
+
+                    # Process each section
+                    for section, pattern in section_patterns.items():
+                        match = pattern.search(day_text)
+                        if match:
+                            content = match.group(1).strip()
+                            if section in ['breakfast', 'lunch', 'dinner']:
+                                current_day[section] = parse_meal(content)
+                            else:
+                                current_day[section] = parse_activity(content)
+
+            # Don't forget to append the last day
+            if current_day:
+                daily_schedule.append(current_day)
+
+            return daily_schedule
+
+        def parse_travel_tips(text: str) -> dict:
+            """Parse travel tips into structured format."""
+            tips = {
+                "weather": "",
+                "transportation": "",
+                "cultural_notes": "",
+                "seasonal_events": ""
             }
             
             current_section = None
-            current_hotel = []
-            current_day = None
-            day_count = 0
-            
-            for line in response_text.split('\n'):
+            for line in text.split('\n'):
                 line = line.strip()
                 if not line:
                     continue
-                
-                # Detect sections
-                if 'ACCOMMODATION' in line.upper():
-                    current_section = 'accommodation'
-                    continue
-                elif 'DAILY ITINERARY' in line.upper():
-                    if current_hotel:
-                        sections['accommodation'].append(parse_accommodation('\n'.join(current_hotel)))
-                        current_hotel = []
-                    current_section = 'daily_itinerary'
-                    continue
-                elif 'TRAVEL TIPS' in line.upper():
-                    if current_hotel:
-                        sections['accommodation'].append(parse_accommodation('\n'.join(current_hotel)))
-                        current_hotel = []
-                    if current_day:
-                        sections['daily_itinerary'].append(current_day)
-                    current_section = 'travel_tips'
-                    continue
-
-                # Process each section
-                if current_section == 'accommodation':
-                    if line.startswith('[') and current_hotel:
-                        sections['accommodation'].append(parse_accommodation('\n'.join(current_hotel)))
-                        current_hotel = []
-                    current_hotel.append(line)
-                
-                elif current_section == 'daily_itinerary':
-                    if line.startswith('Day'):
-                        day_count += 1
-                        if current_day:
-                            sections['daily_itinerary'].append(current_day)
-                        
-                        current_day = {
-                            'day_number': day_count,
-                            'date': datetime.strptime(re.search(r'\d{4}-\d{2}-\d{2}', line).group(), '%Y-%m-%d').date() if re.search(r'\d{4}-\d{2}-\d{2}', line) else None,
-                            'breakfast_spot': '',
-                            'breakfast_rating': 0.0,
-                            'morning_activity': '',
-                            'morning_activity_time': '',
-                            'morning_activity_location': '',
-                            'morning_activity_url': None,
-                            'lunch_spot': '',
-                            'lunch_rating': 0.0,
-                            'afternoon_activity': '',
-                            'afternoon_activity_time': '',
-                            'afternoon_activity_location': '',
-                            'afternoon_activity_url': None,
-                            'dinner_spot': '',
-                            'dinner_rating': 0.0,
-                            'evening_activity': '',
-                            'evening_activity_time': '',
-                            'evening_activity_location': '',
-                            'evening_activity_url': None
-                        }
                     
-                    elif current_day and line.startswith('-'):
-                        if ': ' in line:
-                            key, value = line.split(': ', 1)
-                            key = key.strip('- ').lower()
-                            
-                            if 'breakfast' in key:
-                                name, rating, url = parse_meal(value)
-                                current_day['breakfast_spot'] = name
-                                current_day['breakfast_rating'] = rating
-                            elif 'morning activity' in key:
-                                activity, time, location, url = parse_activity(value)
-                                current_day['morning_activity'] = activity
-                                current_day['morning_activity_time'] = time
-                                current_day['morning_activity_location'] = location
-                                current_day['morning_activity_url'] = url
-                            elif 'lunch' in key:
-                                name, rating, url = parse_meal(value)
-                                current_day['lunch_spot'] = name
-                                current_day['lunch_rating'] = rating
-                            elif 'afternoon activity' in key:
-                                activity, time, location, url = parse_activity(value)
-                                current_day['afternoon_activity'] = activity
-                                current_day['afternoon_activity_time'] = time
-                                current_day['afternoon_activity_location'] = location
-                                current_day['afternoon_activity_url'] = url
-                            elif 'dinner' in key:
-                                name, rating, url = parse_meal(value)
-                                current_day['dinner_spot'] = name
-                                current_day['dinner_rating'] = rating
-                            elif 'evening activity' in key:
-                                activity, time, location, url = parse_activity(value)
-                                current_day['evening_activity'] = activity
-                                current_day['evening_activity_time'] = time
-                                current_day['evening_activity_location'] = location
-                                current_day['evening_activity_url'] = url
-                
-                elif current_section == 'travel_tips' and ':' in line:
-                    key, value = line.split(':', 1)
-                    key = key.strip().lower()
-                    value = value.strip()
-                    
-                    if 'weather' in key:
-                        sections['travel_tips']['weather_summary'] = value
-                    elif 'transportation' in key:
-                        sections['travel_tips']['transportation_tips'] = value
-                    elif 'cultural' in key or 'etiquette' in key:
-                        sections['travel_tips']['cultural_notes'] = value
-                    elif 'seasonal' in key:
-                        sections['travel_tips']['seasonal_events'] = value
+                if line.startswith('Weather:'):
+                    current_section = "weather"
+                    tips["weather"] = line.split(':', 1)[1].strip()
+                elif line.startswith('Transportation:'):
+                    current_section = "transportation"
+                    tips["transportation"] = line.split(':', 1)[1].strip()
+                elif line.startswith('Cultural Notes:'):
+                    current_section = "cultural_notes"
+                    tips["cultural_notes"] = line.split(':', 1)[1].strip()
+                elif line.startswith('Seasonal Events:'):
+                    current_section = "seasonal_events"
+                    tips["seasonal_events"] = line.split(':', 1)[1].strip()
+                elif current_section and line:
+                    tips[current_section] += " " + line
 
-            # Add final hotel if exists
-            if current_hotel:
-                sections['accommodation'].append(parse_accommodation('\n'.join(current_hotel)))
+            return tips
+
+        try:
+            # Split the response into main sections
+            sections = re.split(r'\n(?=ACCOMMODATION:|DAILY ITINERARY:|TRAVEL TIPS:)', response_text)
+            parsed_data = {
+                "accommodation": [],
+                "daily_schedule": [],
+                "travel_tips": {}
+            }
             
-            # Add final day if exists
-            if current_day:
-                sections['daily_itinerary'].append(current_day)
+            # Parse each section
+            for section in sections:
+                if section.strip().startswith('ACCOMMODATION:'):
+                    parsed_data["accommodation"] = parse_accommodation(section)
+                elif section.strip().startswith('DAILY ITINERARY:'):
+                    parsed_data["daily_schedule"] = parse_daily_activities(section)
+                elif section.strip().startswith('TRAVEL TIPS:'):
+                    parsed_data["travel_tips"] = parse_travel_tips(section)
 
             print("\n=== Parsed Data Structure ===")
-            print(json.dumps(sections, indent=2))
+            print(json.dumps(parsed_data, indent=2))
             
-            return sections
+            return parsed_data
             
         except Exception as e:
             print(f"Error parsing response: {str(e)}")
             print(f"Traceback: {traceback.format_exc()}")
             return {
-                'accommodation': [],
-                'daily_itinerary': [],
-                'travel_tips': {
-                    'weather_summary': '',
-                    'transportation_tips': '',
-                    'cultural_notes': '',
-                    'seasonal_events': None
+                "accommodation": [],
+                "daily_schedule": [],
+                "travel_tips": {
+                    "weather": "",
+                    "transportation": "",
+                    "cultural_notes": "",
+                    "seasonal_events": ""
                 }
             }

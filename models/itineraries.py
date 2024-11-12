@@ -1,57 +1,34 @@
-from sqlmodel import Field, SQLModel
-from typing import Optional
-from datetime import date
+from datetime import date, datetime
+from typing import List, Optional
+from sqlmodel import Field, SQLModel, Relationship
+from fastapi import FastAPI, Depends, HTTPException
 from .base import Base
+from sqlalchemy import JSON, Column
 
-class Accommodation(Base, table=True):
-    __tablename__ = "accommodations"
+# Simplified Itinerary Model
+class Itinerary(Base, table=True):
+    __tablename__ = "itineraries"
     
-    trip_id: int = Field(foreign_key="trips.id")
-    name: str
-    description: str
-    location: str
-    rating: float
-    website_url: Optional[str] = None
-    unique_features: Optional[str] = None
-    price_range: Optional[str] = None
-
-class DailyItinerary(Base, table=True):
-    __tablename__ = "daily_itineraries"
+    user_id: str = Field(index=True)
+    destination: str
+    start_date: date
+    end_date: date
     
-    trip_id: int = Field(foreign_key="trips.id")
-    day_number: int
-    date: date
+    # Trip Details
+    arrival_time: Optional[str] = None
+    departure_time: Optional[str] = None
+    notes: Optional[str] = None
     
-    # Morning
-    breakfast_spot: str
-    breakfast_rating: float
-    morning_activity: str
-    morning_activity_time: str
-    morning_activity_location: str
-    morning_activity_url: Optional[str] = None
+    # Accommodation Details
+    hotel_name: Optional[str] = None
+    hotel_location: Optional[str] = None
+    hotel_description: Optional[str] = None
+    hotel_rating: Optional[float] = None
     
-    # Afternoon
-    lunch_spot: str
-    lunch_rating: float
-    afternoon_activity: str
-    afternoon_activity_time: str
-    afternoon_activity_location: str
-    afternoon_activity_url: Optional[str] = None
-    
-    # Evening
-    dinner_spot: str
-    dinner_rating: float
-    evening_activity: str
-    evening_activity_time: str
-    evening_activity_location: str
-    evening_activity_url: Optional[str] = None
-
-class TravelTips(Base, table=True):
-    __tablename__ = "travel_tips"
-    
-    trip_id: int = Field(foreign_key="trips.id", primary_key=True)
-    weather_summary: str
-    clothing_suggestions: str
-    transportation_tips: str
-    cultural_notes: str
-    seasonal_events: Optional[str] = None
+    # Daily Activities (stored as JSON)
+    daily_schedule: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+        
+    # Status and Preferences
+    is_published: bool = Field(default=True)
+    is_favorite: bool = Field(default=False)
+    status: str = Field(default="active")

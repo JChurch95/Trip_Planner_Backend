@@ -15,7 +15,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 # Import models
 from models.base import Base
-from models.itineraries import Accommodation, DailyItinerary, TravelTips  # Updated imports
+from models.itineraries import Itinerary
 from models.trips import Trip
 from models.user_profile import UserProfile, TravelerType, ActivityLevel
 
