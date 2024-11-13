@@ -103,7 +103,7 @@ Morning:
   * Detailed description of the activity (2-3 sentences)
   * What makes it special or worth visiting
   * Practical tips for visiting
-  * Website link if applicable
+  * Include website link
 
 Afternoon:
 - Lunch: Restaurant name (rating) - Include 1-2 sentences about cuisine style, atmosphere, and signature dishes
@@ -111,7 +111,7 @@ Afternoon:
   * Detailed description of the activity (2-3 sentences)
   * Historical or cultural significance
   * What visitors can expect to see/do
-  * Website link if applicable
+  * Include website link
 
 Evening:
 - Dinner: Restaurant name (rating) - Include 1-2 sentences about cuisine style, ambiance, and must-try dishes
@@ -119,7 +119,7 @@ Evening:
   * Detailed description of the activity (2-3 sentences)
   * Why it's worth experiencing
   * What makes it unique
-  * Website link if applicable
+  * Include website link
 
 3. TRAVEL TIPS
 - Weather Considerations: Detailed expected conditions and specific clothing suggestions
@@ -132,7 +132,7 @@ Ensure all recommendations:
 - Include accurate timings and durations
 - Are geographically logical to minimize travel time
 - Align with user preferences and budget
-- Include clickable website links where applicable
+- Include clickable website links
 - Have detailed descriptions for all venues and activities"""
 
     @staticmethod
@@ -145,7 +145,7 @@ Ensure all recommendations:
                     {"role": "system", "content": OpenAIService.SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
+                temperature=0.3,
                 max_tokens=4000  # Increased token limit to accommodate more detailed descriptions
             )
             
@@ -192,52 +192,73 @@ Ensure all recommendations:
             """Parse hotel details into structured format."""
             hotels = []
             current_hotel = None
-            description_buffer = []
             
             lines = text.split('\n')
             for line in lines:
                 line = line.strip()
-                if not line or line.lower() == "accommodation":
+                if not line or line.lower() == 'accommodation':
                     continue
-
-                # Check for new hotel entry
+                    
+                # Check for new hotel entry (starts with number and period)
                 if re.match(r'^\d+\.', line):
+                    # If we already have a hotel, add it to our list
                     if current_hotel:
-                        current_hotel['description'] = ' '.join(description_buffer)
                         hotels.append(current_hotel)
                     
-                    name, url = extract_link_data(line.split('.', 1)[1].strip())
+                    # Start new hotel entry
+                    hotel_name = line.split('.', 1)[1].strip()
+                    # Extract name and website if in markdown link format
+                    link_match = re.match(r'\[(.*?)\]\((.*?)\)', hotel_name)
+                    if link_match:
+                        name = link_match.group(1)
+                        website = link_match.group(2)
+                    else:
+                        name = hotel_name
+                        website = None
+                        
                     current_hotel = {
                         "name": name,
-                        "website": url,
+                        "website": website,
                         "description": "",
                         "location": "",
                         "rating": 0.0,
-                        "unique_features": ""
+                        "star_rating": 0,
+                        "unique_features": "",
+                        "price_range": "",
+                        "nightly_rate": ""
                     }
-                    description_buffer = []
-                elif current_hotel:
-                    if line.startswith('-'):
-                        detail = line[1:].strip()
-                        if ':' in detail:
-                            key, value = detail.split(':', 1)
-                            key = key.lower().strip()
-                            value = value.strip()
-                            
-                            if 'rating' in key:
-                                current_hotel['rating'] = extract_rating(value)
-                            elif 'location' in key:
-                                current_hotel['location'] = value
-                            elif 'unique feature' in key:
-                                current_hotel['unique_features'] = value
-                            else:
-                                description_buffer.append(value)
+                    
+                elif current_hotel and line.startswith('-'):
+                    detail = line[1:].strip()
+                    
+                    # Handle different detail types
+                    if 'Location:' in detail:
+                        current_hotel['location'] = detail.split(':', 1)[1].strip()
+                    elif 'Official Star Rating:' in detail:
+                        try:
+                            current_hotel['star_rating'] = int(re.search(r'(\d+)', detail).group(1))
+                        except (AttributeError, ValueError):
+                            pass
+                    elif 'User Rating:' in detail:
+                        try:
+                            current_hotel['rating'] = float(re.search(r'(\d+\.?\d*)', detail).group(1))
+                        except (AttributeError, ValueError):
+                            pass
+                    elif 'Unique Features:' in detail:
+                        current_hotel['unique_features'] = detail.split(':', 1)[1].strip()
+                    elif 'Price Range Category:' in detail:
+                        current_hotel['price_range'] = detail.split(':', 1)[1].strip()
+                    elif 'Typical Nightly Rate:' in detail:
+                        current_hotel['nightly_rate'] = detail.split(':', 1)[1].strip()
+                    else:
+                        # If no specific label, treat as part of description
+                        if current_hotel['description']:
+                            current_hotel['description'] += ' ' + detail
                         else:
-                            description_buffer.append(detail)
+                            current_hotel['description'] = detail
             
-            # Don't forget the last hotel
+            # Don't forget to add the last hotel
             if current_hotel:
-                current_hotel['description'] = ' '.join(description_buffer)
                 hotels.append(current_hotel)
             
             return hotels

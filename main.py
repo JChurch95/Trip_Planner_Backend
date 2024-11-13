@@ -12,8 +12,25 @@ from models.trips import Trip
 from models.itineraries import Itinerary
 from models.user_profile import UserProfile, TravelerType, ActivityLevel
 from services.openai_service import OpenAIService
+from services.auth_helpers import verify_token, extract_user_id
 import json
 import traceback
+
+
+# Add the get_current_user dependency
+async def get_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())]
+) -> str:
+    """Dependency that extracts and verifies user ID from JWT token."""
+    if not credentials:
+        raise HTTPException(status_code=403, detail="No authentication credentials provided")
+    
+    payload = verify_token(credentials.credentials, SUPABASE_SECRET_KEY)
+    user_id = extract_user_id(payload)
+    return user_id
+
+
+
 
 app = FastAPI(
     title="Trip Planner API",
@@ -21,11 +38,17 @@ app = FastAPI(
     version="1.0.0",
 )
 
+
+
+
 origins = [
     "http://localhost:5173",
     "http://localhost:8000",
     "http://127.0.0.1:5173"
 ]
+
+
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,78 +58,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 app.swagger_ui_init_oauth = {
     "usePkceWithAuthorizationCodeGrant": True,
 }
+
 
 security_scheme = {
     "Bearer": {
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT",
-        "description": "Enter your JWT token in the format: Bearer <token>"
+        "description": "Enter your Supabase JWT token in the format: Bearer <token>"
     }
 }
 
 app.openapi_components = {"securitySchemes": security_scheme}
 app.openapi_security = [{"Bearer": []}]
 
-def verify_token(token: str):
-    """Verify JWT token from Supabase"""
-    try:
-        if token.startswith('Bearer '):
-            token = token.split(' ')[1]
-        
-        try:
-            print("\n=== Token Verification Debug ===")
-            print(f"Received token: {token[:20]}...")
-            
-            payload = jwt.decode(
-                token, 
-                SUPABASE_SECRET_KEY,
-                algorithms=["HS256", "JWS"],
-                options={"verify_signature": False}
-            )
-            
-            print(f"Decoded payload: {payload}")
-            
-            # For Supabase anonymous users, use the ref as the user ID
-            if payload.get('role') == 'anon' and payload.get('ref'):
-                user_id = payload['ref']
-            else:
-                # For authenticated users, check standard claims
-                user_id = (
-                    payload.get('sub') or
-                    payload.get('user_id') or
-                    payload.get('uid') or
-                    payload.get('ref')  # Fallback to ref if no other ID found
-                )
-                
-            if not user_id:
-                raise HTTPException(
-                    status_code=401,
-                    detail="Could not determine user ID from token"
-                )
-                
-            print(f"Extracted user_id: {user_id}")
-            
-            # Add the user_id to the payload for consistent access
-            payload['user_id'] = user_id
-            return payload
-            
-        except jwt.InvalidTokenError as e:
-            print(f"\nToken decode error: {str(e)}")
-            raise HTTPException(
-                status_code=401,
-                detail=f"Invalid token format: {str(e)}"
-            )
-            
-    except Exception as e:
-        print(f"\nToken verification error: {str(e)}")
-        raise HTTPException(
-            status_code=401, 
-            detail="Authentication failed"
-        )
+app.openapi_components = {"securitySchemes": security_scheme}
+app.openapi_security = [{"Bearer": []}]
+
+
+
+
+
+
 
 async def generate_itinerary(trip: Trip, user_profile: Optional[UserProfile] = None) -> str:
     """Generate a detailed itinerary using OpenAI based on trip details."""
@@ -168,64 +145,45 @@ async def generate_itinerary(trip: Trip, user_profile: Optional[UserProfile] = N
         print(f"OpenAI API error: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to generate itinerary")
 
+
+
+
 @app.get("/")
 def root():
     """Root endpoint - API health check"""
     return {"message": "Welcome to the Trip Planner API!"}
 
+
+
+
 # Trip Creation and Management
 @app.post("/trips/create")
 async def create_trip(
     trip: Trip,
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    user_id: Annotated[str, Depends(get_current_user)],
     session: Session = Depends(get_session)
 ):
     """Create a new trip and generate its itinerary."""
     try:
-        if not credentials:
-            raise HTTPException(status_code=403, detail="No authentication credentials provided")
-        
-        auth_result = verify_token(credentials.credentials)
-        user_id = auth_result.get('sub') or auth_result.get('ref')
-        
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Could not determine user ID")
-        
-        # Check if user profile exists, create if it doesn't
+        # Get or create user profile
         user_profile = session.exec(
             select(UserProfile).where(UserProfile.user_id == user_id)
         ).first()
         
         if not user_profile:
-            # Create a basic user profile
-            user_profile = UserProfile(
-                user_id=user_id,
-                # Set minimal defaults
-                traveler_type=None,
-                activity_level=None,
-                budget_preference=None,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
-            )
+            # Create a basic profile if none exists
+            user_profile = UserProfile(user_id=user_id)
             session.add(user_profile)
-            try:
-                session.commit()
-            except Exception as e:
-                print(f"Error creating user profile: {str(e)}")
-                session.rollback()
-                raise HTTPException(
-                    status_code=500,
-                    detail="Failed to create user profile"
-                )
+            session.commit()
+            print("Created new user profile")
         
-        # Now create the trip
+        # Set the user_id on the trip
         trip.user_id = user_id
         session.add(trip)
         session.commit()
         session.refresh(trip)
         
         try:
-            # Rest of the existing trip creation logic...
             print("\n=== Generating OpenAI Content ===")
             itinerary_content = await generate_itinerary(trip, user_profile)
             print("\nRaw OpenAI Response:")
@@ -278,30 +236,21 @@ async def create_trip(
         }
     
     except Exception as e:
-        print(f"\nERROR in trip creation: {str(e)}")
-        print(f"Error type: {type(e)}")
-        print(f"Error traceback: {traceback.format_exc()}")
-        session.rollback()
+        print(f"Error in create_trip: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
 
 @app.get("/trips")
 async def get_trips(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    user_id: Annotated[str, Depends(get_current_user)],
     session: Session = Depends(get_session),
     show_unpublished: bool = False,
     favorites_only: bool = False
 ):
     """Get all trips for the authenticated user."""
-    if not credentials:
-        raise HTTPException(status_code=403, detail="Not authenticated")
-    
-    auth_result = verify_token(credentials.credentials)
-    # Update user_id extraction
-    user_id = auth_result.get('sub') or auth_result.get('ref')
-    
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Could not determine user ID")
-    
     print(f"Fetching trips for user: {user_id}")
     print(f"Filters - show_unpublished: {show_unpublished}, favorites_only: {favorites_only}")
     
@@ -318,23 +267,16 @@ async def get_trips(
     
     return trips
 
+
+
+
 @app.delete("/trips/{trip_id}")
 async def delete_trip(
     trip_id: int,
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    user_id: Annotated[str, Depends(get_current_user)],
     session: Session = Depends(get_session)
 ):
     """Delete a trip and all associated data."""
-    if not credentials:
-        raise HTTPException(status_code=403, detail="Not authenticated")
-    
-    auth_result = verify_token(credentials.credentials)
-    # Update user_id extraction
-    user_id = auth_result.get('sub') or auth_result.get('ref')
-    
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Could not determine user ID")
-    
     trip = session.get(Trip, trip_id)
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
@@ -354,23 +296,16 @@ async def delete_trip(
     
     return {"message": "Trip and associated data deleted successfully"}
 
+
+
+
 @app.get("/trips/{trip_id}/details")
 async def get_trip_details(
     trip_id: int,
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    user_id: Annotated[str, Depends(get_current_user)],
     session: Session = Depends(get_session)
 ):
     """Get basic details for a specific trip."""
-    if not credentials:
-        raise HTTPException(status_code=403, detail="Not authenticated")
-    
-    auth_result = verify_token(credentials.credentials)
-    # Update user_id extraction
-    user_id = auth_result.get('sub') or auth_result.get('ref')
-    
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Could not determine user ID")
-    
     trip = session.get(Trip, trip_id)
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
@@ -387,23 +322,16 @@ async def get_trip_details(
         "is_favorite": trip.is_favorite
     }
 
+
+
+
 # User Profile Routes
 @app.get("/users/profile")
 async def get_user_profile(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    user_id: Annotated[str, Depends(get_current_user)],
     session: Session = Depends(get_session)
 ):
     """Get user profile."""
-    if not credentials:
-        raise HTTPException(status_code=403, detail="Not authenticated")
-    
-    auth_result = verify_token(credentials.credentials)
-    # Update user_id extraction
-    user_id = auth_result.get('sub') or auth_result.get('ref')
-    
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Could not determine user ID")
-    
     profile = session.exec(
         select(UserProfile).where(UserProfile.user_id == user_id)
     ).first()
@@ -413,23 +341,16 @@ async def get_user_profile(
     
     return profile
 
+
+
+
 @app.post("/users/profile")
 async def create_or_update_profile(
     profile: UserProfile,
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())],
+    user_id: Annotated[str, Depends(get_current_user)],
     session: Session = Depends(get_session)
 ):
     """Create or update user profile."""
-    if not credentials:
-        raise HTTPException(status_code=403, detail="Not authenticated")
-    
-    auth_result = verify_token(credentials.credentials)
-    # Update user_id extraction
-    user_id = auth_result.get('sub') or auth_result.get('ref')
-    
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Could not determine user ID")
-    
     existing_profile = session.exec(
         select(UserProfile).where(UserProfile.user_id == user_id)
     ).first()
@@ -448,10 +369,14 @@ async def create_or_update_profile(
     session.commit()
     return {"message": "Profile updated successfully"}
 
+
+
 # Initialize database on startup
 @app.on_event("startup")
 async def on_startup():
     init_db()
+
+
 
 # Run the application
 if __name__ == "__main__":
