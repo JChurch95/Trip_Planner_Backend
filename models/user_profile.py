@@ -19,31 +19,32 @@ class ActivityLevel(str, Enum):
     ACTIVE = "active"
 
 class BudgetPreference(str, Enum):
-    BUDGET = "BUDGET"           # $50-100 per day
-    COMFORT = "COMFORT"         # $100-200 per day 
-    PREMIUM = "PREMIUM"         # $200-500 per day
-    LUXURY = "LUXURY"           # $500-1000 per day
-    ULTRA_LUXURY = "ULTRA_LUXURY"  # $1000+ per day
+    BUDGET = "BUDGET"      # $100-200 per day
+    COMFORT = "COMFORT"    # $200-400 per day
+    PREMIUM = "PREMIUM"    # $400-800 per day  
+    LUXURY = "LUXURY"      # $800-1500 per day
+    ULTRA_LUXURY = "ULTRA_LUXURY"  # $1500+ per day
+
 
     def get_budget_range(self) -> tuple[int, int]:
         """Returns the daily budget range in USD for this preference level"""
         ranges = {
-            "BUDGET": (50, 100),
-            "COMFORT": (100, 200),
-            "PREMIUM": (200, 500),
-            "LUXURY": (500, 1000),
-            "ULTRA_LUXURY": (1000, float('inf'))
+            "BUDGET": (100, 200),
+            "COMFORT": (200, 400),
+            "PREMIUM": (400, 800),
+            "LUXURY": (800, 1500),
+            "ULTRA_LUXURY": (1500, float('inf'))
         }
         return ranges[self.value]
     
     def get_description(self) -> str:
         """Returns a human-readable description of this budget level"""
         descriptions = {
-            "BUDGET": "Budget-friendly options, $50-100 per day",
-            "COMFORT": "Mid-range comfort, $100-200 per day",
-            "PREMIUM": "Premium experiences, $200-500 per day",
-            "LUXURY": "Luxury accommodations and dining, $500-1000 per day",
-            "ULTRA_LUXURY": "Ultra-luxury with no expense spared, $1000+ per day"
+            "BUDGET": "Budget-friendly options, $100-200 per day",
+            "COMFORT": "Mid-range comfort, $200-400 per day",
+            "PREMIUM": "Premium experiences, $400-800 per day",
+            "LUXURY": "Luxury accommodations and dining, $800-1500 per day",
+            "ULTRA_LUXURY": "Ultra-luxury with no expense spared, $1500+ per day"
         }
         return descriptions[self.value]
 

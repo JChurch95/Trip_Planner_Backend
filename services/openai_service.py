@@ -2,6 +2,7 @@ import os
 from openai import OpenAI
 from typing import Optional
 import re
+import unicodedata
 import traceback
 import json
 from datetime import datetime, date
@@ -21,7 +22,7 @@ Required format:
       "rating": "number between 4.2 and 5.0 (required)",
       "unique_features": "string (required)",
       "nightly_rate": "number (required, NEVER use currency symbols, just the numeric value)",
-      "website": "string URL (required)"
+      "url": "string URL (required)"
     }
   ],
   "daily_schedule": [
@@ -83,66 +84,56 @@ STRICT REQUIREMENTS:
 10. Each day must have different activities and dining spots
 11. Nightly rate should be a **numeric value ONLY** with **no currency symbols**, such as `100`. The value should be a whole number, not a decimal.
 12. NEVER use control characters or non-printable characters in the JSON response.
+
+STRICT BUDGET RESTRICTIONS:
+1. For budget_preference "BUDGET": total daily cost including accommodation must be $100-200
+2. For budget_preference "COMFORT": total daily cost including accommodation must be $200-400
+3. For budget_preference "PREMIUM": total daily cost including accommodation must be $400-800
+4. For budget_preference "LUXURY": total daily cost including accommodation must be $800-1500
+5. For budget_preference "ULTRA_LUXURY": total daily cost including accommodation must be $1500+
+6. ALL accommodation and dining choices must fit within these daily budget ranges
+7. Daily budget must cover accommodation, meals, and activities
+8. Restaurant and activity choices should align with the budget tier
 """
 
     @staticmethod
     async def generate_trip_plan(prompt: str) -> str:
         """Generate itinerary using OpenAI."""
         try:
-            # Update to use gpt-4-1106-preview model which supports consistent JSON outputs
             response = client.chat.completions.create(
                 model="gpt-4-1106-preview",
                 messages=[
                     {"role": "system", "content": OpenAIService.SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.1,  # Low temperature for consistent output
+                temperature=0.1,
                 response_format={"type": "json_object"}
             )
             
             if not response.choices:
                 raise Exception("No response generated from OpenAI")
             
-            # Parse the response to validate it's proper JSON
-            try:
-                json_response = json.loads(response.choices[0].message.content)
-                return json.dumps(json_response, ensure_ascii=False, indent=2)
-            except json.JSONDecodeError as e:
-                raise Exception(f"Invalid JSON response: {str(e)}")
-            
+            # The response is already valid JSON, just return it directly
+            return response.choices[0].message.content
+                
         except Exception as e:
             print(f"Error generating trip plan: {str(e)}")
             raise
 
 
-    @staticmethod
-    def _clean_json_string(json_str: str) -> str:
-        """Remove comments and clean the JSON string for parsing."""
-        # Remove single-line comments
-        json_str = re.sub(r'//.*$', '', json_str, flags=re.MULTILINE)
-        # Remove multi-line comments
-        json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
-        # Remove any trailing commas before closing brackets/braces
-        json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
-        return json_str
-    
 
     @staticmethod
     def parse_itinerary_response(response_text: str) -> dict:
-        """Parse OpenAI response from JSON format into structured data matching the itinerary model."""
+        """Parse OpenAI response from JSON format into structured data."""
         try:
-            # First try to parse the response as JSON after cleaning
-            try:
-                cleaned_json = OpenAIService._clean_json_string(response_text)
-                parsed_data = json.loads(cleaned_json)
-                print("\n=== Successfully parsed JSON response ===")
-                return parsed_data
-            except json.JSONDecodeError as e:
-                print(f"Failed to parse JSON: {str(e)}")
-                print("Falling back to text parsing...")
-
-            # Initialize default structure for parsed data
-            parsed_data = {
+            # Direct parse of the JSON response
+            parsed_data = json.loads(response_text)
+            print("\n=== Successfully parsed JSON response ===")
+            return parsed_data
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse JSON: {str(e)}")
+            # Return the default structure if parsing fails
+            return {
                 "accommodation": [{
                     "name": "Default Hotel",
                     "description": "Hotel information not available",
@@ -169,43 +160,6 @@ STRICT REQUIREMENTS:
                 }
             }
 
-            # If text parsing is needed, use the existing methods but maintain the default structure
-            sections = re.split(r'\n(?=ACCOMMODATION:|DAILY ITINERARY:|TRAVEL TIPS:)', response_text)
-            
-            for section in sections:
-                if section.strip().startswith('ACCOMMODATION:'):
-                    accommodations = OpenAIService._parse_accommodation(section)
-                    if accommodations:
-                        parsed_data["accommodation"] = accommodations
-                elif section.strip().startswith('DAILY ITINERARY:'):
-                    daily_schedule = OpenAIService._parse_daily_activities(section)
-                    if daily_schedule:
-                        parsed_data["daily_schedule"] = daily_schedule
-                elif section.strip().startswith('TRAVEL TIPS:'):
-                    travel_tips = OpenAIService._parse_travel_tips(section)
-                    if travel_tips:
-                        parsed_data["travel_tips"] = travel_tips
-
-            return parsed_data
-            
-        except Exception as e:
-            print(f"Error parsing response: {str(e)}")
-            print(f"Traceback: {traceback.format_exc()}")
-            # Return the default structure in case of any error
-            return parsed_data
-            
-        except Exception as e:
-            print(f"Error parsing response: {str(e)}")
-            print(f"Traceback: {traceback.format_exc()}")
-            return {
-                "accommodation": [],
-                "daily_schedule": [],
-                "travel_tips": {
-                    "weather": "",
-                    "transportation": "",
-                    "cultural_notes": ""
-                }
-            }
 
     @staticmethod
     def _parse_meal(text: str) -> dict:
