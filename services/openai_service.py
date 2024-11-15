@@ -160,7 +160,7 @@ STRICT BUDGET RESTRICTIONS:
                     {"role": "system", "content": OpenAIService.SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.1,
+                temperature=0.0,
                 response_format={"type": "json_object"}
             )
             
