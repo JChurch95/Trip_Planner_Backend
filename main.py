@@ -16,7 +16,6 @@ from services.auth_helpers import verify_token, extract_user_id
 import json
 import traceback
 
-
 # Add the get_current_user dependency
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(HTTPBearer())]
@@ -29,26 +28,17 @@ async def get_current_user(
     user_id = extract_user_id(payload)
     return user_id
 
-
-
-
 app = FastAPI(
     title="Trip Planner API",
     description="API for managing travel itineraries",
     version="1.0.0",
 )
 
-
-
-
 origins = [
     "http://localhost:5173",
     "http://localhost:8000",
     "http://127.0.0.1:5173"
 ]
-
-
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,11 +48,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 app.swagger_ui_init_oauth = {
     "usePkceWithAuthorizationCodeGrant": True,
 }
-
 
 security_scheme = {
     "Bearer": {
@@ -75,15 +63,6 @@ security_scheme = {
 
 app.openapi_components = {"securitySchemes": security_scheme}
 app.openapi_security = [{"Bearer": []}]
-
-app.openapi_components = {"securitySchemes": security_scheme}
-app.openapi_security = [{"Bearer": []}]
-
-
-
-
-
-
 
 async def generate_itinerary(trip: Trip, user_profile: Optional[UserProfile] = None) -> str:
     """Generate a detailed itinerary using OpenAI based on trip details."""
@@ -145,18 +124,11 @@ async def generate_itinerary(trip: Trip, user_profile: Optional[UserProfile] = N
         print(f"OpenAI API error: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to generate itinerary")
 
-
-
-
 @app.get("/")
 def root():
     """Root endpoint - API health check"""
     return {"message": "Welcome to the Trip Planner API!"}
 
-
-
-
-# Trip Creation and Management
 @app.post("/trips/create")
 async def create_trip(
     trip: Trip,
@@ -171,7 +143,6 @@ async def create_trip(
         ).first()
         
         if not user_profile:
-            # Create a basic profile if none exists
             user_profile = UserProfile(user_id=user_id)
             session.add(user_profile)
             session.commit()
@@ -196,21 +167,21 @@ async def create_trip(
             
             # Create new Itinerary object
             new_itinerary = Itinerary(
-                user_id=user_id,
-                destination=trip.destination,
-                start_date=trip.start_date,
-                end_date=trip.end_date,
-                arrival_time=trip.arrival_time,
-                departure_time=trip.departure_time,
-                notes=trip.additional_notes,
-                daily_schedule=structured_data.get('daily_itinerary', {}),
-                hotel_name=structured_data.get('accommodation', [{}])[0].get('name'),
-                hotel_location=structured_data.get('accommodation', [{}])[0].get('location'),
-                hotel_description=structured_data.get('accommodation', [{}])[0].get('description'),
-                hotel_rating=structured_data.get('accommodation', [{}])[0].get('rating'),
-                is_published=True,
-                status="active"
-            )
+            user_id=user_id,
+            destination=trip.destination,
+            start_date=trip.start_date,
+            end_date=trip.end_date,
+            arrival_time=trip.arrival_time,
+            departure_time=trip.departure_time,
+            notes=trip.additional_notes,
+            daily_schedule=structured_data.get('daily_schedule', []),  # Changed key and default to []
+            hotel_name=structured_data.get('accommodation', [{}])[0].get('name'),
+            hotel_location=structured_data.get('accommodation', [{}])[0].get('location'),
+            hotel_description=structured_data.get('accommodation', [{}])[0].get('description'),
+            hotel_rating=structured_data.get('accommodation', [{}])[0].get('rating'),
+            is_published=True,
+            status="active"
+        )
             
             session.add(new_itinerary)
             session.commit()
@@ -239,10 +210,6 @@ async def create_trip(
         print(f"Error in create_trip: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-
-
-
 @app.get("/trips")
 async def get_trips(
     user_id: Annotated[str, Depends(get_current_user)],
@@ -267,8 +234,83 @@ async def get_trips(
     
     return trips
 
+@app.get("/trips/{trip_id}/details")
+async def get_trip_details(
+    trip_id: int,
+    user_id: Annotated[str, Depends(get_current_user)],
+    session: Session = Depends(get_session)
+):
+    """Get basic details for a specific trip."""
+    trip = session.get(Trip, trip_id)
+    
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    if trip.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this trip")
+    
+    return {
+        "id": trip.id,
+        "user_id": trip.user_id,
+        "destination": trip.destination,
+        "start_date": trip.start_date,
+        "end_date": trip.end_date,
+        "arrival_time": trip.arrival_time,
+        "departure_time": trip.departure_time,
+        "status": trip.status,
+        "is_published": trip.is_published,
+        "is_favorite": trip.is_favorite
+    }
 
-
+@app.get("/itineraries/{trip_id}")
+async def get_itinerary(
+    trip_id: int,
+    user_id: Annotated[str, Depends(get_current_user)],
+    session: Session = Depends(get_session)
+):
+    """Get detailed itinerary information for a trip."""
+    trip = session.get(Trip, trip_id)
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    if trip.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this itinerary")
+    
+    # Improve the query to be more specific
+    itinerary = session.exec(
+        select(Itinerary)
+        .where(Itinerary.user_id == user_id)
+        .where(Itinerary.destination == trip.destination)
+        .where(Itinerary.start_date == trip.start_date)
+        .where(Itinerary.end_date == trip.end_date)
+    ).first()
+    
+    if not itinerary:
+        raise HTTPException(status_code=404, detail="Itinerary not found")
+    
+    # Ensure daily_schedule is properly serialized
+    try:
+        daily_schedule = itinerary.daily_schedule
+        if isinstance(daily_schedule, str):
+            daily_schedule = json.loads(daily_schedule)
+    except (json.JSONDecodeError, TypeError):
+        daily_schedule = []
+    
+    return {
+        "id": itinerary.id,
+        "destination": itinerary.destination,
+        "start_date": itinerary.start_date,
+        "end_date": itinerary.end_date,
+        "arrival_time": itinerary.arrival_time,
+        "departure_time": itinerary.departure_time,
+        "notes": itinerary.notes,
+        "daily_schedule": daily_schedule,  # Now guaranteed to be a list
+        "hotel_name": itinerary.hotel_name,
+        "hotel_location": itinerary.hotel_location,
+        "hotel_description": itinerary.hotel_description,
+        "hotel_rating": itinerary.hotel_rating,
+        "status": itinerary.status
+    }
 
 @app.delete("/trips/{trip_id}")
 async def delete_trip(
@@ -296,36 +338,6 @@ async def delete_trip(
     
     return {"message": "Trip and associated data deleted successfully"}
 
-
-
-
-@app.get("/trips/{trip_id}/details")
-async def get_trip_details(
-    trip_id: int,
-    user_id: Annotated[str, Depends(get_current_user)],
-    session: Session = Depends(get_session)
-):
-    """Get basic details for a specific trip."""
-    trip = session.get(Trip, trip_id)
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    if trip.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to view this trip")
-    
-    return {
-        "id": trip.id,
-        "destination": trip.destination,
-        "start_date": trip.start_date,
-        "end_date": trip.end_date,
-        "user_id": trip.user_id,
-        "is_published": trip.is_published,
-        "is_favorite": trip.is_favorite
-    }
-
-
-
-
-# User Profile Routes
 @app.get("/users/profile")
 async def get_user_profile(
     user_id: Annotated[str, Depends(get_current_user)],
@@ -340,9 +352,6 @@ async def get_user_profile(
         raise HTTPException(status_code=404, detail="Profile not found")
     
     return profile
-
-
-
 
 @app.post("/users/profile")
 async def create_or_update_profile(
@@ -369,14 +378,10 @@ async def create_or_update_profile(
     session.commit()
     return {"message": "Profile updated successfully"}
 
-
-
 # Initialize database on startup
 @app.on_event("startup")
 async def on_startup():
     init_db()
-
-
 
 # Run the application
 if __name__ == "__main__":

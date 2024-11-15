@@ -1,11 +1,8 @@
-from datetime import date, datetime
-from typing import List, Optional
-from sqlmodel import Field, SQLModel, Relationship
-from fastapi import FastAPI, Depends, HTTPException
+from datetime import date
+from typing import Optional, Dict, Any
+from sqlmodel import Field, SQLModel, Column, JSON
 from .base import Base
-from sqlalchemy import JSON, Column
 
-# Simplified Itinerary Model
 class Itinerary(Base, table=True):
     __tablename__ = "itineraries"
     
@@ -26,8 +23,11 @@ class Itinerary(Base, table=True):
     hotel_rating: Optional[float] = None
     
     # Daily Activities (stored as JSON)
-    daily_schedule: Optional[dict] = Field(default=None, sa_column=Column(JSON))
-        
+    daily_schedule: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(JSON)
+    )
+    
     # Status and Preferences
     is_published: bool = Field(default=True)
     is_favorite: bool = Field(default=False)

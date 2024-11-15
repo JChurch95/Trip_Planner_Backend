@@ -96,6 +96,60 @@ STRICT BUDGET RESTRICTIONS:
 8. Restaurant and activity choices should align with the budget tier
 """
 
+    # Add this right after SYSTEM_INSTRUCTIONS and before generate_trip_plan
+    @staticmethod
+    def validate_response_structure(data: dict) -> bool:
+        """Validate the OpenAI response matches our required schema."""
+        try:
+            # Validate accommodation
+            if not isinstance(data.get('accommodation'), list) or len(data['accommodation']) == 0:
+                return False
+            
+            for hotel in data['accommodation']:
+                required_hotel_fields = ['name', 'description', 'location', 'rating', 'unique_features', 'nightly_rate', 'url']
+                if not all(field in hotel for field in required_hotel_fields):
+                    return False
+                if not (4.2 <= float(hotel['rating']) <= 5.0):
+                    return False
+
+            # Validate daily_schedule
+            if not isinstance(data.get('daily_schedule'), list) or len(data['daily_schedule']) == 0:
+                return False
+                    
+            for day in data['daily_schedule']:
+                required_day_fields = ['day_number', 'date', 'breakfast', 'morning_activity', 
+                                    'lunch', 'afternoon_activity', 'dinner', 'evening_activity']
+                if not all(field in day for field in required_day_fields):
+                    return False
+                    
+                # Validate date format
+                try:
+                    datetime.strptime(day['date'], '%Y-%m-%d')
+                except ValueError:
+                    return False
+                    
+                # Validate meal entries
+                for meal in ['breakfast', 'lunch', 'dinner']:
+                    if not all(field in day[meal] for field in ['spot', 'rating', 'description', 'url']):
+                        return False
+                    if not (4.2 <= float(day[meal]['rating']) <= 5.0):
+                        return False
+                    
+                # Validate activities
+                for activity in ['morning_activity', 'afternoon_activity', 'evening_activity']:
+                    if not all(field in day[activity] for field in ['activity', 'description', 'url']):
+                        return False
+
+            # Validate travel_tips
+            required_tips_fields = ['weather', 'transportation', 'cultural_notes']
+            if not all(field in data.get('travel_tips', {}) for field in required_tips_fields):
+                return False
+
+            return True
+
+        except (TypeError, ValueError, KeyError):
+            return False
+
     @staticmethod
     async def generate_trip_plan(prompt: str) -> str:
         """Generate itinerary using OpenAI."""
@@ -128,11 +182,13 @@ STRICT BUDGET RESTRICTIONS:
         try:
             # Direct parse of the JSON response
             parsed_data = json.loads(response_text)
-            print("\n=== Successfully parsed JSON response ===")
-            return parsed_data
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse JSON: {str(e)}")
-            # Return the default structure if parsing fails
+            
+            # Add validation check
+            if OpenAIService.validate_response_structure(parsed_data):
+                print("\n=== Successfully parsed and validated JSON response ===")
+                return parsed_data
+                
+            print("\n=== JSON parsed but failed validation, returning default structure ===")
             return {
                 "accommodation": [{
                     "name": "Default Hotel",
@@ -158,6 +214,12 @@ STRICT BUDGET RESTRICTIONS:
                     "transportation": "Transportation information not available",
                     "cultural_notes": "Cultural information not available"
                 }
+            }
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse JSON: {str(e)}")
+            # Return the default structure if parsing fails
+            return {
+                # Same default structure as above
             }
 
 
