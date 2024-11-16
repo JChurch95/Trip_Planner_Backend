@@ -177,11 +177,11 @@ async def create_trip(
                 departure_time=trip.departure_time,
                 notes=trip.additional_notes,
                 daily_schedule=structured_data.get('daily_schedule', []),
-                accommodation=structured_data.get('accommodation', []),  # Save the full accommodation array
+                accommodation=structured_data.get('accommodation', []),
+                travel_tips=structured_data.get('travel_tips', {}),  
                 is_published=True,
                 status="active"
-)
-            
+)            
             session.add(new_itinerary)
             session.commit()
             
@@ -329,6 +329,7 @@ async def get_itinerary(
         "notes": itinerary.notes,
         "daily_schedule": daily_schedule,
         "accommodation": accommodation,
+        "travel_tips": itinerary.travel_tips,
         "status": itinerary.status
     }
 
