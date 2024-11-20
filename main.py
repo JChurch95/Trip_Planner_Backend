@@ -339,13 +339,19 @@ async def delete_trip(
     user_id: Annotated[str, Depends(get_current_user)],
     session: Session = Depends(get_session)
 ):
-    """Delete a trip and all associated data."""
+    """Delete a trip and all associated data, unless it's marked as favorite."""
     trip = session.get(Trip, trip_id)
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
     
     if trip.user_id != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this trip")
+    
+    if trip.is_favorite:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot delete a favorited trip. Please unfavorite the trip first."
+        )
     
     # Delete associated itinerary if it exists
     itinerary = session.exec(
@@ -398,6 +404,33 @@ async def create_or_update_profile(
     
     session.commit()
     return {"message": "Profile updated successfully"}
+
+# Favorite Button
+@app.post("/trips/{trip_id}/favorite")
+async def toggle_favorite(
+    trip_id: int,
+    favorite_data: dict,
+    user_id: Annotated[str, Depends(get_current_user)],
+    session: Session = Depends(get_session)
+):
+    """Toggle favorite status for a trip."""
+    trip = session.get(Trip, trip_id)
+    
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    if trip.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify this trip")
+    
+    trip.is_favorite = favorite_data.get('is_favorite', False)
+    session.add(trip)
+    session.commit()
+    
+    return {
+        "message": "Favorite status updated successfully",
+        "is_favorite": trip.is_favorite
+    }
+
 
 # Initialize database on startup
 @app.on_event("startup")
