@@ -77,13 +77,16 @@ STRICT REQUIREMENTS:
 3. ALL dates must be in YYYY-MM-DD format
 4. ALL ratings must be between 4.2 and 5.0
 5. Include exactly 3 hotels in accommodation array
-6. Include a daily_schedule entry for EACH day of the trip
-7. NEVER include additional fields or objects
-8. NEVER include explanatory text or comments
-9. NEVER use null values - use empty strings for optional fields
-10. Each day must have different activities and dining spots
-11. Nightly rate should be a **numeric value ONLY** with **no currency symbols**, such as `100`. The value should be a whole number, not a decimal.
-12. NEVER use control characters or non-printable characters in the JSON response.
+6. URLs must be real, official websites for the mentioned places/activities
+7. URLs should link to the official business website or a reliable booking/information page
+8. URLs do not need to match the business name exactly
+9. Include a daily_schedule entry for EACH day of the trip
+10. NEVER include additional fields or objects
+11. NEVER include explanatory text or comments
+12. NEVER use null values - use empty strings for optional fields
+13. Each day must have different activities and dining spots
+14. Nightly rate should be a **numeric value ONLY** with **no currency symbols**, such as `100`. The value should be a whole number, not a decimal.
+15. NEVER use control characters or non-printable characters in the JSON response.
 
 STRICT BUDGET RESTRICTIONS:
 1. For budget_preference "BUDGET": total daily cost including accommodation must be $100-200

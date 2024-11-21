@@ -11,6 +11,7 @@ psy = "*"
 psycopg2-binary = "*"
 pyjwt = "*"
 openai = "*"
+python-dotenv = "*"
 
 [dev-packages]
 
