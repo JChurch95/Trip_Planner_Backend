@@ -3,7 +3,7 @@
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'backend-little-sun-5450'
+app = 'rabbit-route'
 primary_region = 'iad'
 
 [build]
