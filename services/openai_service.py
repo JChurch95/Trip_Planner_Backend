@@ -77,7 +77,7 @@ STRICT REQUIREMENTS:
 3. ALL dates must be in YYYY-MM-DD format
 4. ALL ratings must be between 4.2 and 5.0
 5. Include exactly 3 hotels in accommodation array
-6. URLs must be real, official websites for the mentioned places/activities
+6. URLs must be real, working, official websites for the mentioned places/activities
 7. URLs should link to the official business website or a reliable booking/information page
 8. URLs do not need to match the business name exactly
 9. Include a daily_schedule entry for EACH day of the trip
